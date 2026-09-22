@@ -3,18 +3,19 @@ import { useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import {
   LayoutDashboard, Package, ShoppingCart, Calendar,
-  Users, Truck, BarChart3, Menu, X, LogOut, Boxes
+  Users, Truck, BarChart3, Menu, X, LogOut, Boxes, Calculator
 } from 'lucide-react';
 
 const NAV = [
-  { to: '/dashboard', label: 'Inicio',     Icon: LayoutDashboard },
-  { to: '/stock',     label: 'Stock',      Icon: Package },
-  { to: '/kits',      label: 'Kits',       Icon: Boxes },
-  { to: '/pedidos',   label: 'Pedidos',    Icon: ShoppingCart },
-  { to: '/agenda',    label: 'Agenda',     Icon: Calendar },
-  { to: '/clientes',  label: 'Clientes',   Icon: Users },
-  { to: '/compras',   label: 'Compras',    Icon: Truck },
-  { to: '/reportes',  label: 'Reportes',   Icon: BarChart3 }
+  { to: '/dashboard',    label: 'Inicio',       Icon: LayoutDashboard },
+  { to: '/stock',        label: 'Stock',        Icon: Package },
+  { to: '/kits',         label: 'Kits',         Icon: Boxes },
+  { to: '/calculadora',  label: 'Calculadora',  Icon: Calculator },
+  { to: '/pedidos',      label: 'Pedidos',      Icon: ShoppingCart },
+  { to: '/agenda',       label: 'Agenda',       Icon: Calendar },
+  { to: '/clientes',     label: 'Clientes',     Icon: Users },
+  { to: '/compras',      label: 'Compras',      Icon: Truck },
+  { to: '/reportes',     label: 'Reportes',     Icon: BarChart3 }
 ];
 
 const NAV_MOBILE = NAV.filter(n =>

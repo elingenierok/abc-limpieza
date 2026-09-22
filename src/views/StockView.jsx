@@ -4,9 +4,10 @@ import {
 } from '../modules/stock/stock.repo.js';
 import InsumoModal from '../components/InsumoModal.jsx';
 import MovimientoModal from '../components/MovimientoModal.jsx';
+import ProduccionModal from '../components/ProduccionModal.jsx';
 import {
   Plus, Edit2, Trash2, AlertCircle, Search,
-  ArrowDownUp, Package
+  ArrowDownUp, Package, Beaker, FlaskConical, Droplets
 } from 'lucide-react';
 
 const BADGE = {
@@ -37,12 +38,16 @@ export default function StockView() {
   const [error, setError] = useState(null);
   const [busqueda, setBusqueda] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('TODOS');
+  const [filtroTipo, setFiltroTipo] = useState('TODOS');
 
   const [modalInsumo, setModalInsumo] = useState(false);
   const [insumoEditar, setInsumoEditar] = useState(null);
 
   const [modalMov, setModalMov] = useState(false);
   const [insumoMov, setInsumoMov] = useState(null);
+
+  const [modalProd, setModalProd] = useState(false);
+  const [insumoProd, setInsumoProd] = useState(null);
 
   useEffect(() => {
     cargarLista();
@@ -76,6 +81,11 @@ export default function StockView() {
     setModalMov(true);
   };
 
+  const handleProducir = (insumo) => {
+    setInsumoProd(insumo);
+    setModalProd(true);
+  };
+
   const handleEliminar = async (insumo) => {
     if (!confirm(`¿Eliminar "${insumo.nom}"? Sólo se puede borrar si no tiene movimientos.`)) return;
     try {
@@ -91,15 +101,33 @@ export default function StockView() {
     }
   };
 
-  // Contadores por estado
-  const contadores = useMemo(() => {
-    const c = { CRITICO: 0, BAJO: 0, ATENCION: 0, OK: 0 };
-    for (const i of insumos) c[i.estado_stock] = (c[i.estado_stock] ?? 0) + 1;
+  // Contadores por tipo
+  const contadoresTipo = useMemo(() => {
+    const c = { CONC: 0, DIL: 0, OTRO: 0 };
+    for (const i of insumos) {
+      if (i.cod.endsWith('-CONC')) c.CONC++;
+      else if (i.cod.endsWith('-DIL')) c.DIL++;
+      else c.OTRO++;
+    }
     return c;
   }, [insumos]);
 
+  // Contadores por estado (sobre los filtrados por tipo)
+  const contadoresEstado = useMemo(() => {
+    const base = insumos.filter(i => {
+      if (filtroTipo === 'CONC') return i.cod.endsWith('-CONC');
+      if (filtroTipo === 'DIL')  return i.cod.endsWith('-DIL');
+      return true;
+    });
+    const c = { CRITICO: 0, BAJO: 0, ATENCION: 0, OK: 0 };
+    for (const i of base) c[i.estado_stock] = (c[i.estado_stock] ?? 0) + 1;
+    return c;
+  }, [insumos, filtroTipo]);
+
   const filtrados = useMemo(() => {
     return insumos.filter(i => {
+      if (filtroTipo === 'CONC' && !i.cod.endsWith('-CONC')) return false;
+      if (filtroTipo === 'DIL'  && !i.cod.endsWith('-DIL'))  return false;
       if (filtroEstado !== 'TODOS' && i.estado_stock !== filtroEstado) return false;
       if (!busqueda.trim()) return true;
       const s = busqueda.toLowerCase();
@@ -108,7 +136,13 @@ export default function StockView() {
         i.nom.toLowerCase().includes(s)
       );
     });
-  }, [insumos, busqueda, filtroEstado]);
+  }, [insumos, busqueda, filtroEstado, filtroTipo]);
+
+  const totalBase = filtroTipo === 'CONC'
+    ? contadoresTipo.CONC
+    : filtroTipo === 'DIL'
+    ? contadoresTipo.DIL
+    : insumos.length;
 
   return (
     <div className="space-y-6">
@@ -129,7 +163,43 @@ export default function StockView() {
         </button>
       </div>
 
-      {/* Filtros rápidos por estado */}
+      {/* Filtros por tipo (Concentrado / Diluido) */}
+      {insumos.length > 0 && (
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => setFiltroTipo('TODOS')}
+            className={`text-xs px-3 py-1.5 rounded-full border transition flex items-center gap-1 ${
+              filtroTipo === 'TODOS'
+                ? 'bg-slate-800 text-white border-sky-500'
+                : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800'
+            }`}
+          >
+            <Package size={12} /> Todos ({insumos.length})
+          </button>
+          <button
+            onClick={() => setFiltroTipo('CONC')}
+            className={`text-xs px-3 py-1.5 rounded-full border transition flex items-center gap-1 ${
+              filtroTipo === 'CONC'
+                ? 'bg-emerald-900/40 text-emerald-300 border-emerald-600'
+                : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800'
+            }`}
+          >
+            <FlaskConical size={12} /> Concentrados ({contadoresTipo.CONC})
+          </button>
+          <button
+            onClick={() => setFiltroTipo('DIL')}
+            className={`text-xs px-3 py-1.5 rounded-full border transition flex items-center gap-1 ${
+              filtroTipo === 'DIL'
+                ? 'bg-sky-900/40 text-sky-300 border-sky-600'
+                : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800'
+            }`}
+          >
+            <Droplets size={12} /> Diluidos ({contadoresTipo.DIL})
+          </button>
+        </div>
+      )}
+
+      {/* Filtros por estado */}
       {insumos.length > 0 && (
         <div className="flex gap-2 flex-wrap">
           <button
@@ -140,15 +210,18 @@ export default function StockView() {
                 : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800'
             }`}
           >
-            Todos ({insumos.length})
+            Todos ({totalBase})
           </button>
-          {Object.entries(contadores).map(([estado, n]) => (
+          {Object.entries(contadoresEstado).map(([estado, n]) => (
             <button
               key={estado}
               onClick={() => setFiltroEstado(estado)}
+              disabled={n === 0}
               className={`text-xs px-3 py-1.5 rounded-full border transition ${
                 filtroEstado === estado
                   ? `bg-slate-800 text-white border-sky-500`
+                  : n === 0
+                  ? `bg-slate-900/50 text-slate-600 border-slate-800 cursor-not-allowed`
                   : `bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800`
               }`}
             >
@@ -238,13 +311,24 @@ export default function StockView() {
                   </div>
 
                   <div className="flex flex-col items-end gap-1 shrink-0">
-                    <button
-                      onClick={() => handleMovimiento(i)}
-                      className="text-xs bg-sky-600/20 hover:bg-sky-600/30 text-sky-400 border border-sky-800/50 px-2 py-1 rounded transition flex items-center gap-1 whitespace-nowrap"
-                      title="Registrar movimiento de stock"
-                    >
-                      <ArrowDownUp size={12} /> Movimiento
-                    </button>
+                    <div className="flex items-center gap-1 flex-wrap justify-end">
+                      {i.cod.endsWith('-CONC') && (
+                        <button
+                          onClick={() => handleProducir(i)}
+                          className="text-xs bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-800/50 px-2 py-1 rounded transition flex items-center gap-1 whitespace-nowrap"
+                          title="Producir diluido a partir de este concentrado"
+                        >
+                          <Beaker size={12} /> Producir
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleMovimiento(i)}
+                        className="text-xs bg-sky-600/20 hover:bg-sky-600/30 text-sky-400 border border-sky-800/50 px-2 py-1 rounded transition flex items-center gap-1 whitespace-nowrap"
+                        title="Registrar movimiento de stock"
+                      >
+                        <ArrowDownUp size={12} /> Movimiento
+                      </button>
+                    </div>
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => handleEditar(i)}
@@ -280,6 +364,13 @@ export default function StockView() {
         isOpen={modalMov}
         insumo={insumoMov}
         onClose={() => setModalMov(false)}
+        onGuardado={cargarLista}
+      />
+
+      <ProduccionModal
+        isOpen={modalProd}
+        insumo={insumoProd}
+        onClose={() => setModalProd(false)}
         onGuardado={cargarLista}
       />
     </div>

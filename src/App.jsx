@@ -8,6 +8,7 @@ import PedidosView from './views/PedidosView.jsx';
 import Placeholder from './views/Placeholder.jsx';
 import ClientesView from './views/ClientesView.jsx';
 import KitsView from './views/KitsView.jsx';
+import CalculadoraView from './views/CalculadoraView.jsx';
 
 // Componente para proteger las rutas privadas
 function RutaProtegida({ children }) {
@@ -54,6 +55,7 @@ export default function App() {
         <Route path="/agenda"    element={<Placeholder titulo="Agenda" />} />
         <Route path="/clientes"  element={<ClientesView />} />
         <Route path="/kits"      element={<KitsView />} /> {/* cambio de prueba */}
+        <Route path="/calculadora" element={<CalculadoraView />} />
         <Route path="/compras"   element={<Placeholder titulo="Compras" />} />
         <Route path="/reportes"  element={<Placeholder titulo="Reportes" />} />
         <Route path="*"          element={<Navigate to="/dashboard" replace />} />
