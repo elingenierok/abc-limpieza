@@ -133,18 +133,18 @@ export default function KitModal({ isOpen, kit, onClose, onGuardado }) {
 
   // Enriquecer items con datos del insumo (incluye precio_concentrado para diluidos)
   const itemsEnriquecidos = items.map(item => {
-    const insumo = insumos.find(i => i.cod === item.cod);
-    return {
-      ...item,
-      tipo: insumo?.tipo ?? null,
-      unidad: insumo?.unidad ?? null,
-      nom: insumo?.nom ?? null,
-      stock_actual: insumo?.stock ?? 0,
-      precio_unit: Number(insumo?.precio_unit ?? 0),
-      factor_dilucion: insumo?.factor_dilucion ?? null,
-      precio_concentrado: insumo?.precio_concentrado ?? null
-    };
-  });
+  const insumo = insumos.find(i => i.cod === item.cod);
+  return {
+    ...item,
+    tipo: insumo?.tipo ?? null,
+    unidad: insumo?.unidad ?? null,
+    nom: insumo?.nom ?? null,
+    stock_actual: insumo?.stock ?? 0,
+    precio_unit: Number(insumo?.precio_unit ?? 0),
+    factor_dilucion: insumo?.factor_conc_relacionado ?? insumo?.factor_dilucion ?? null,
+    precio_concentrado: insumo?.precio_concentrado ?? null
+  };
+});
 
   // Cálculo del precio en vivo — usa las funciones del repo
   const margenDecimal = Number(margen) / 100;

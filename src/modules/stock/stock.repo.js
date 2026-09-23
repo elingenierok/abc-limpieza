@@ -50,32 +50,33 @@ function tiparError(err) {
 async function enriquecerConPrecioConcentrado(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return rows;
 
-  // 1. Recolectar códigos de concentrados relacionados
   const codigosConc = rows
     .map(r => r.insumo_conc_relacionado)
     .filter(Boolean);
 
   if (codigosConc.length === 0) return rows;
 
-  // 2. Traer los concentrados en una sola consulta
   const { data: concs, error } = await supabase
     .from('stock_insumos')
-    .select('cod, precio_unit')
+    .select('cod, precio_unit, factor_dilucion')
     .in('cod', codigosConc);
 
   if (error) throw tiparError(error);
 
   const mapaConc = Object.fromEntries(
-    (concs ?? []).map(c => [c.cod, Number(c.precio_unit ?? 0)])
+    (concs ?? []).map(c => [c.cod, c])
   );
 
-  // 3. Agregar precio_concentrado a cada fila
-  return rows.map(r => ({
-    ...r,
-    precio_concentrado: r.insumo_conc_relacionado
-      ? (mapaConc[r.insumo_conc_relacionado] ?? null)
-      : null
-  }));
+  return rows.map(r => {
+    const conc = r.insumo_conc_relacionado
+      ? mapaConc[r.insumo_conc_relacionado]
+      : null;
+    return {
+      ...r,
+      precio_concentrado:    conc ? Number(conc.precio_unit ?? 0)    : null,
+      factor_conc_relacionado: conc ? Number(conc.factor_dilucion ?? 0) : null
+    };
+  });
 }
 
 /* =========================================================

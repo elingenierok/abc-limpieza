@@ -85,7 +85,7 @@ function tiparError(err) {
 async function hidratarKit(kitRow) {
   if (!kitRow) return null;
 
-  // 1. Traer items + datos del insumo (sin join anidado al concentrado)
+  // 1. Traer items + datos del insumo
   const { data: items, error } = await supabase
     .from('kit_items')
     .select(`
@@ -99,12 +99,12 @@ async function hidratarKit(kitRow) {
 
   if (error) throw tiparError(error);
 
-  // 2. Recolectar los códigos de concentrados relacionados
+  // 2. Recolectar códigos de concentrados relacionados
   const codigosConcentrados = (items ?? [])
     .map(i => i.stock_insumos?.insumo_conc_relacionado)
     .filter(Boolean);
 
-  // 3. Traer los concentrados en una sola consulta
+  // 3. Traer concentrados con precio Y factor
   let mapaConcentrados = {};
   if (codigosConcentrados.length > 0) {
     const { data: concs, error: errConc } = await supabase
@@ -119,7 +119,7 @@ async function hidratarKit(kitRow) {
     );
   }
 
-  // 4. Armar componentes con el precio del concentrado resuelto
+  // 4. Armar componentes con datos del concentrado resueltos
   const componentes = (items ?? []).map(i => {
     const si = i.stock_insumos;
     const codConc = si?.insumo_conc_relacionado;
@@ -133,7 +133,7 @@ async function hidratarKit(kitRow) {
       stock_actual:       Number(si?.stock ?? 0),
       precio_unit:        Number(si?.precio_unit ?? 0),
       tipo:               si?.tipo ?? null,
-      factor_dilucion:    si?.factor_dilucion ?? null,
+      factor_dilucion:    Number(conc?.factor_dilucion ?? 0) || null,
       precio_concentrado: Number(conc?.precio_unit ?? 0) || null
     };
   });
