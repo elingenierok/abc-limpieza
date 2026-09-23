@@ -7,7 +7,7 @@ import MovimientoModal from '../components/MovimientoModal.jsx';
 import ProduccionModal from '../components/ProduccionModal.jsx';
 import {
   Plus, Edit2, Trash2, AlertCircle, Search,
-  ArrowDownUp, Package, Beaker, FlaskConical, Droplets
+  ArrowDownUp, Package, Beaker, FlaskConical, Droplets, Package2
 } from 'lucide-react';
 
 const BADGE = {
@@ -101,12 +101,11 @@ export default function StockView() {
     }
   };
 
-  // Contadores por tipo
+  // Contadores por tipo (usa la columna tipo)
   const contadoresTipo = useMemo(() => {
-    const c = { CONC: 0, DIL: 0, OTRO: 0 };
+    const c = { LIQUIDO_CONC: 0, LIQUIDO_DIL: 0, PACKAGING: 0, KIT_ARMADO: 0, OTRO: 0 };
     for (const i of insumos) {
-      if (i.cod.endsWith('-CONC')) c.CONC++;
-      else if (i.cod.endsWith('-DIL')) c.DIL++;
+      if (c[i.tipo] !== undefined) c[i.tipo]++;
       else c.OTRO++;
     }
     return c;
@@ -115,9 +114,8 @@ export default function StockView() {
   // Contadores por estado (sobre los filtrados por tipo)
   const contadoresEstado = useMemo(() => {
     const base = insumos.filter(i => {
-      if (filtroTipo === 'CONC') return i.cod.endsWith('-CONC');
-      if (filtroTipo === 'DIL')  return i.cod.endsWith('-DIL');
-      return true;
+      if (filtroTipo === 'TODOS') return true;
+      return i.tipo === filtroTipo;
     });
     const c = { CRITICO: 0, BAJO: 0, ATENCION: 0, OK: 0 };
     for (const i of base) c[i.estado_stock] = (c[i.estado_stock] ?? 0) + 1;
@@ -126,8 +124,7 @@ export default function StockView() {
 
   const filtrados = useMemo(() => {
     return insumos.filter(i => {
-      if (filtroTipo === 'CONC' && !i.cod.endsWith('-CONC')) return false;
-      if (filtroTipo === 'DIL'  && !i.cod.endsWith('-DIL'))  return false;
+      if (filtroTipo !== 'TODOS' && i.tipo !== filtroTipo) return false;
       if (filtroEstado !== 'TODOS' && i.estado_stock !== filtroEstado) return false;
       if (!busqueda.trim()) return true;
       const s = busqueda.toLowerCase();
@@ -138,11 +135,9 @@ export default function StockView() {
     });
   }, [insumos, busqueda, filtroEstado, filtroTipo]);
 
-  const totalBase = filtroTipo === 'CONC'
-    ? contadoresTipo.CONC
-    : filtroTipo === 'DIL'
-    ? contadoresTipo.DIL
-    : insumos.length;
+  const totalBase = filtroTipo === 'TODOS'
+    ? insumos.length
+    : contadoresTipo[filtroTipo] ?? 0;
 
   return (
     <div className="space-y-6">
@@ -163,7 +158,7 @@ export default function StockView() {
         </button>
       </div>
 
-      {/* Filtros por tipo (Concentrado / Diluido) */}
+      {/* Filtros por tipo */}
       {insumos.length > 0 && (
         <div className="flex gap-2 flex-wrap">
           <button
@@ -177,24 +172,34 @@ export default function StockView() {
             <Package size={12} /> Todos ({insumos.length})
           </button>
           <button
-            onClick={() => setFiltroTipo('CONC')}
+            onClick={() => setFiltroTipo('LIQUIDO_CONC')}
             className={`text-xs px-3 py-1.5 rounded-full border transition flex items-center gap-1 ${
-              filtroTipo === 'CONC'
+              filtroTipo === 'LIQUIDO_CONC'
                 ? 'bg-emerald-900/40 text-emerald-300 border-emerald-600'
                 : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800'
             }`}
           >
-            <FlaskConical size={12} /> Concentrados ({contadoresTipo.CONC})
+            <FlaskConical size={12} /> Concentrados ({contadoresTipo.LIQUIDO_CONC})
           </button>
           <button
-            onClick={() => setFiltroTipo('DIL')}
+            onClick={() => setFiltroTipo('LIQUIDO_DIL')}
             className={`text-xs px-3 py-1.5 rounded-full border transition flex items-center gap-1 ${
-              filtroTipo === 'DIL'
+              filtroTipo === 'LIQUIDO_DIL'
                 ? 'bg-sky-900/40 text-sky-300 border-sky-600'
                 : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800'
             }`}
           >
-            <Droplets size={12} /> Diluidos ({contadoresTipo.DIL})
+            <Droplets size={12} /> Diluidos ({contadoresTipo.LIQUIDO_DIL})
+          </button>
+          <button
+            onClick={() => setFiltroTipo('PACKAGING')}
+            className={`text-xs px-3 py-1.5 rounded-full border transition flex items-center gap-1 ${
+              filtroTipo === 'PACKAGING'
+                ? 'bg-amber-900/40 text-amber-300 border-amber-600'
+                : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800'
+            }`}
+          >
+            <Package2 size={12} /> Packaging ({contadoresTipo.PACKAGING})
           </button>
         </div>
       )}
@@ -262,6 +267,7 @@ export default function StockView() {
           {filtrados.map(i => {
             const cobertura = i.cobertura_dias;
             const critico = i.estado_stock === 'CRITICO' || i.estado_stock === 'BAJO';
+            const esConcentrado = i.tipo === 'LIQUIDO_CONC';
 
             return (
               <div
@@ -312,7 +318,7 @@ export default function StockView() {
 
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <div className="flex items-center gap-1 flex-wrap justify-end">
-                      {i.cod.endsWith('-CONC') && (
+                      {esConcentrado && (
                         <button
                           onClick={() => handleProducir(i)}
                           className="text-xs bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-800/50 px-2 py-1 rounded transition flex items-center gap-1 whitespace-nowrap"

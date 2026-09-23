@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
-  crearKit, actualizarKit, actualizarKitItems, obtenerKit
+  crearKit, actualizarKit, actualizarKitItems, obtenerKit,
+  calcularCostoUnitario, calcularCostoBase, calcularPrecioKit
 } from '../modules/kits/kits.repo.js';
 import { listarInsumos } from '../modules/stock/stock.repo.js';
 import { X, Plus, Trash2, AlertCircle, Package, Boxes } from 'lucide-react';
@@ -33,6 +34,7 @@ export default function KitModal({ isOpen, kit, onClose, onGuardado }) {
   const [categoria, setCategoria]       = useState('Hogar');
   const [descripcion, setDescripcion]   = useState('');
   const [activo, setActivo]             = useState(true);
+  const [margen, setMargen]             = useState(50); // en porcentaje, 50 = 0.5
   const [items, setItems]               = useState([]);
 
   const [insumos, setInsumos]           = useState([]);
@@ -58,6 +60,7 @@ export default function KitModal({ isOpen, kit, onClose, onGuardado }) {
     setCategoria('Hogar');
     setDescripcion('');
     setActivo(true);
+    setMargen(50);
     setItems([]);
   };
 
@@ -83,6 +86,7 @@ export default function KitModal({ isOpen, kit, onClose, onGuardado }) {
       setCategoria(completo.categoria ?? 'Hogar');
       setDescripcion(completo.descripcion ?? '');
       setActivo(completo.activo ?? true);
+      setMargen(Math.round(Number(completo.margen ?? 0.5) * 100));
       setItems(
         (completo.componentes ?? []).map(c => ({
           cod: c.cod,
@@ -127,16 +131,25 @@ export default function KitModal({ isOpen, kit, onClose, onGuardado }) {
     });
   };
 
-  // Cálculo del precio en vivo
-  const precioCalculado = (() => {
-    const bruto = items.reduce((acc, item) => {
-      const insumo = insumos.find(i => i.cod === item.cod);
-      const precio = Number(insumo?.precio_unit ?? 0);
-      const cant = Number(item.cantidad ?? 0);
-      return acc + (precio * cant);
-    }, 0);
-    return Math.round(bruto / 100) * 100;
-  })();
+  // Enriquecer items con datos del insumo (incluye precio_concentrado para diluidos)
+  const itemsEnriquecidos = items.map(item => {
+    const insumo = insumos.find(i => i.cod === item.cod);
+    return {
+      ...item,
+      tipo: insumo?.tipo ?? null,
+      unidad: insumo?.unidad ?? null,
+      nom: insumo?.nom ?? null,
+      stock_actual: insumo?.stock ?? 0,
+      precio_unit: Number(insumo?.precio_unit ?? 0),
+      factor_dilucion: insumo?.factor_dilucion ?? null,
+      precio_concentrado: insumo?.precio_concentrado ?? null
+    };
+  });
+
+  // Cálculo del precio en vivo — usa las funciones del repo
+  const margenDecimal = Number(margen) / 100;
+  const costoBase     = calcularCostoBase(itemsEnriquecidos);
+  const precioCalculado = calcularPrecioKit(itemsEnriquecidos, margenDecimal);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -160,18 +173,23 @@ export default function KitModal({ isOpen, kit, onClose, onGuardado }) {
         return;
       }
     }
+    const margenNum = Number(margen);
+    if (!Number.isFinite(margenNum) || margenNum < 0 || margenNum >= 100) {
+      setError('El margen debe estar entre 0 y 99.99%.');
+      return;
+    }
 
     setEnviando(true);
     try {
+      const margenDec = margenNum / 100;
       if (modoEdicion) {
-        // 1. Actualizar datos básicos
         await actualizarKit(kit.id, {
           nombre: nombre.trim(),
           categoria: categoria.trim(),
           descripcion: descripcion.trim() || null,
-          activo
+          activo,
+          margen: margenDec
         });
-        // 2. Reemplazar componentes
         await actualizarKitItems(kit.id, items);
       } else {
         await crearKit({
@@ -179,6 +197,7 @@ export default function KitModal({ isOpen, kit, onClose, onGuardado }) {
           nombre: nombre.trim(),
           categoria: categoria.trim(),
           descripcion: descripcion.trim() || null,
+          margen: margenDec,
           items
         });
       }
@@ -301,8 +320,26 @@ export default function KitModal({ isOpen, kit, onClose, onGuardado }) {
                 />
               </div>
 
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">
+                  Margen de ganancia (%)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="99.99"
+                  step="0.5"
+                  value={margen}
+                  onChange={e => setMargen(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-500"
+                />
+                <p className="text-[10px] text-slate-600 mt-1">
+                  Margen real sobre el precio. Ej: 50% significa que el 50% del precio es ganancia.
+                </p>
+              </div>
+
               {modoEdicion && (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 pt-5">
                   <input
                     type="checkbox"
                     id="kit-activo"
@@ -339,10 +376,8 @@ export default function KitModal({ isOpen, kit, onClose, onGuardado }) {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {items.map((item, idx) => {
-                    const insumoActual = insumos.find(i => i.cod === item.cod);
-                    const subtotal = Number(insumoActual?.precio_unit ?? 0) * Number(item.cantidad ?? 0);
-
+                  {itemsEnriquecidos.map((item, idx) => {
+                    const subtotal = calcularCostoUnitario(item);
                     return (
                       <div
                         key={idx}
@@ -354,9 +389,9 @@ export default function KitModal({ isOpen, kit, onClose, onGuardado }) {
                             onChange={e => actualizarItem(idx, 'cod', e.target.value)}
                             className="flex-1 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200"
                           >
-                            {insumoActual && (
+                            {item.cod && (
                               <option value={item.cod}>
-                                {insumoActual.nom} ({insumoActual.cod})
+                                {item.nom} ({item.cod})
                               </option>
                             )}
                             {insumosDisponibles.map(ins => (
@@ -376,7 +411,7 @@ export default function KitModal({ isOpen, kit, onClose, onGuardado }) {
                           />
 
                           <span className="text-[10px] text-slate-500 w-8">
-                            {insumoActual?.unidad ?? '—'}
+                            {item.unidad ?? '—'}
                           </span>
 
                           <button
@@ -389,7 +424,7 @@ export default function KitModal({ isOpen, kit, onClose, onGuardado }) {
                         </div>
                         <div className="text-[10px] text-slate-600 pl-1">
                           Subtotal: {formatearPrecio(subtotal)}
-                          {insumoActual && ` · Stock actual: ${insumoActual.stock} ${insumoActual.unidad}`}
+                          {item.nom && ` · Stock actual: ${item.stock_actual} ${item.unidad ?? ''}`}
                         </div>
                       </div>
                     );
@@ -399,13 +434,27 @@ export default function KitModal({ isOpen, kit, onClose, onGuardado }) {
             </div>
 
             {/* Precio calculado en vivo */}
-            <div className="bg-slate-950 border border-slate-800 rounded p-3 flex items-center justify-between">
-              <span className="text-[10px] text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                <Boxes size={12} /> Precio calculado del kit
-              </span>
-              <span className="text-lg font-bold text-sky-400 tabular-nums">
-                {formatearPrecio(precioCalculado)}
-              </span>
+            <div className="bg-slate-950 border border-slate-800 rounded p-3 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">Costo base del kit</span>
+                <span className="text-slate-200 tabular-nums font-bold">
+                  {formatearPrecio(costoBase)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">Margen aplicado</span>
+                <span className="text-slate-200 tabular-nums">
+                  {margen}%
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+                <span className="text-[10px] text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                  <Boxes size={12} /> Precio de venta
+                </span>
+                <span className="text-lg font-bold text-sky-400 tabular-nums">
+                  {formatearPrecio(precioCalculado)}
+                </span>
+              </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-4 border-t border-slate-800">

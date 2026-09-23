@@ -46,6 +46,38 @@ function tiparError(err) {
   return { code: 'ERROR_SUPABASE', detalle: msg, raw: err };
 }
 
+/* Enriquecer filas con precio_concentrado para los diluidos */
+async function enriquecerConPrecioConcentrado(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return rows;
+
+  // 1. Recolectar códigos de concentrados relacionados
+  const codigosConc = rows
+    .map(r => r.insumo_conc_relacionado)
+    .filter(Boolean);
+
+  if (codigosConc.length === 0) return rows;
+
+  // 2. Traer los concentrados en una sola consulta
+  const { data: concs, error } = await supabase
+    .from('stock_insumos')
+    .select('cod, precio_unit')
+    .in('cod', codigosConc);
+
+  if (error) throw tiparError(error);
+
+  const mapaConc = Object.fromEntries(
+    (concs ?? []).map(c => [c.cod, Number(c.precio_unit ?? 0)])
+  );
+
+  // 3. Agregar precio_concentrado a cada fila
+  return rows.map(r => ({
+    ...r,
+    precio_concentrado: r.insumo_conc_relacionado
+      ? (mapaConc[r.insumo_conc_relacionado] ?? null)
+      : null
+  }));
+}
+
 /* =========================================================
    API PÚBLICA
    ========================================================= */
@@ -58,6 +90,7 @@ export async function listarInsumos({ filtroEstado, ordenarPor } = {}) {
   if (error) throw tiparError(error);
 
   let rows = (data ?? []).map(conDerivados);
+  rows = await enriquecerConPrecioConcentrado(rows);
 
   if (filtroEstado) {
     rows = rows.filter(r => r.estado_stock === filtroEstado);
@@ -86,16 +119,28 @@ export async function obtenerInsumo(cod) {
     .maybeSingle();
 
   if (error) throw tiparError(error);
-  return conDerivados(data);
+  if (!data) return null;
+
+  const [enriquecido] = await enriquecerConPrecioConcentrado([conDerivados(data)]);
+  return enriquecido;
 }
 
 export async function crearInsumo({
   cod, nom, unidad, minimo = 0, consumo_diario = 0, precio_unit = 0,
-  stock_inicial = 0, usuario_id = null
+  stock_inicial = 0, usuario_id = null,
+  factor_dilucion = null, insumo_conc_relacionado = null,
+  tipo = null
 }) {
+  const insertData = {
+    cod, nom, unidad, stock: 0, minimo, consumo_diario, precio_unit
+  };
+  if (factor_dilucion !== null) insertData.factor_dilucion = factor_dilucion;
+  if (insumo_conc_relacionado !== null) insertData.insumo_conc_relacionado = insumo_conc_relacionado;
+  if (tipo !== null) insertData.tipo = tipo;
+
   const { data, error } = await supabase
     .from('stock_insumos')
-    .insert({ cod, nom, unidad, stock: 0, minimo, consumo_diario, precio_unit })
+    .insert(insertData)
     .select('*')
     .single();
 
@@ -121,7 +166,7 @@ export async function actualizarFicha(cod, payload) {
     console.warn('[stock.repo] actualizarFicha recibió "stock" — ignorado (R2)');
   }
 
-  const permitidos = ['nom','unidad','minimo','consumo_diario','precio_unit','factor_dilucion','insumo_conc_relacionado'];
+  const permitidos = ['nom','unidad','minimo','consumo_diario','precio_unit','factor_dilucion','insumo_conc_relacionado','tipo'];
   const limpio = Object.fromEntries(
     Object.entries(resto).filter(([k]) => permitidos.includes(k))
   );
@@ -250,7 +295,6 @@ export async function obtenerParDilucion(codDiluido) {
 
 /* =========================================================
    Dilución · registra producción (atómico)
-   Descuenta concentrado, suma diluido, registra 2 movimientos
    ========================================================= */
 export async function registrarProduccion({
   codConcentrado,
@@ -261,7 +305,6 @@ export async function registrarProduccion({
     throw { code: 'INPUT_INVALIDO', detalle: 'cantidad debe ser > 0' };
   }
 
-  // 1. Obtener concentrado y su factor
   const { data: conc, error: errConc } = await supabase
     .from('stock_insumos')
     .select('cod, nom, stock, factor_dilucion, unidad')
@@ -274,7 +317,6 @@ export async function registrarProduccion({
     throw { code: 'SIN_FACTOR', detalle: 'El insumo no tiene factor de dilución' };
   }
 
-  // 2. Buscar el diluido relacionado
   const { data: diluido, error: errDil } = await supabase
     .from('stock_insumos')
     .select('cod, nom, stock, unidad')
@@ -284,10 +326,8 @@ export async function registrarProduccion({
   if (errDil) throw tiparError(errDil);
   if (!diluido) throw { code: 'SIN_DILUIDO', detalle: 'No hay insumo diluido relacionado' };
 
-  // 3. Calcular rendimiento
   const cantidadDiluido = Number((cantidadConcentrado * conc.factor_dilucion).toFixed(2));
 
-  // 4. Registrar salida del concentrado
   await registrarMovimiento({
     cod: codConcentrado,
     tipo: 'salida',
@@ -296,7 +336,6 @@ export async function registrarProduccion({
     usuario_id
   });
 
-  // 5. Registrar entrada del diluido
   await registrarMovimiento({
     cod: diluido.cod,
     tipo: 'entrada',

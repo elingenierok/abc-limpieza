@@ -2,15 +2,14 @@ import { supabase } from '../../core/supabase.js';
 
 /* =========================================================
    F-009 · kit_max_armable
-   Réplica en JS de la lógica de kits_con_stock_virtual
    ========================================================= */
 export function calcularMaxArmables(componentes) {
   if (!Array.isArray(componentes) || componentes.length === 0) return null;
 
   let min = Infinity;
   for (const c of componentes) {
-    if (!(c.cantidad > 0)) return null;         // componente inválido → kit no armable
-    if (c.stock_actual <= 0) return 0;          // stock 0 → 0
+    if (!(c.cantidad > 0)) return null;
+    if (c.stock_actual <= 0) return 0;
     const r = Math.floor(c.stock_actual / c.cantidad);
     if (r < min) min = r;
   }
@@ -18,22 +17,54 @@ export function calcularMaxArmables(componentes) {
 }
 
 /* =========================================================
-   F-010 · precio del kit (calculado + redondeo)
-   Redondeo a la centena. Configurable en REDONDEO.
+   F-010 · costo y precio del kit (Margen Real)
+   costo_unitario de un LIQUIDO_DIL = precio_concentrado / factor_dilucion
+   costo_base = suma(costo_unitario × cantidad) de todos los componentes
+   precio_venta = costo_base / (1 - margen)   [margen real, no markup]
+   Redondeo a la centena.
    ========================================================= */
 export const REDONDEO = 100;
 
-export function calcularPrecioKit(componentes, redondeo = REDONDEO) {
+export function calcularCostoUnitario(componente) {
+  const tipo = componente.tipo;
+  const cantidad = Number(componente.cantidad ?? 0);
+  if (!(cantidad > 0)) return 0;
+
+  // Diluido: usar precio del concentrado relacionado ÷ factor
+  if (tipo === 'LIQUIDO_DIL') {
+    const precioConc = Number(componente.precio_concentrado ?? 0);
+    const factor = Number(componente.factor_dilucion ?? 0);
+    if (precioConc > 0 && factor > 1) {
+      return (precioConc / factor) * cantidad;
+    }
+    // Fallback: si no hay concentrado relacionado, usar precio_unit directo
+    return Number(componente.precio_unit ?? 0) * cantidad;
+  }
+
+  // Packaging, concentrado u otro: precio_unit directo
+  return Number(componente.precio_unit ?? 0) * cantidad;
+}
+
+export function calcularCostoBase(componentes) {
   if (!Array.isArray(componentes) || componentes.length === 0) return 0;
+  return componentes.reduce((acc, c) => acc + calcularCostoUnitario(c), 0);
+}
 
-  const bruto = componentes.reduce((acc, c) => {
-    const precio = Number(c.precio_unit ?? 0);
-    const cant   = Number(c.cantidad ?? 0);
-    return acc + (precio * cant);
-  }, 0);
+export function calcularPrecioKit(componentes, margen = 0, redondeo = REDONDEO) {
+  const costoBase = calcularCostoBase(componentes);
+  if (costoBase <= 0) return 0;
 
-  if (redondeo <= 0) return Number(bruto.toFixed(2));
-  return Math.round(bruto / redondeo) * redondeo;
+  const m = Number(margen);
+  let precio;
+  if (!Number.isFinite(m) || m <= 0 || m >= 1) {
+    // Sin margen: el precio es igual al costo
+    precio = costoBase;
+  } else {
+    precio = costoBase / (1 - m);
+  }
+
+  if (redondeo <= 0) return Number(precio.toFixed(2));
+  return Math.round(precio / redondeo) * redondeo;
 }
 
 /* Normaliza error de Supabase */
@@ -50,32 +81,67 @@ function tiparError(err) {
   return { code: 'ERROR_SUPABASE', detalle: msg, raw: err };
 }
 
-/* Trae un kit con sus items + stock y precio de cada insumo + max_armables + precio calculado */
+/* Trae un kit con sus items + datos completos del insumo + concentrado relacionado */
 async function hidratarKit(kitRow) {
   if (!kitRow) return null;
 
+  // 1. Traer items + datos del insumo (sin join anidado al concentrado)
   const { data: items, error } = await supabase
     .from('kit_items')
     .select(`
       item_cod,
       cantidad,
-      stock_insumos:item_cod ( cod, nom, unidad, stock, precio_unit )
+      stock_insumos:item_cod (
+        cod, nom, unidad, stock, precio_unit, tipo, factor_dilucion, insumo_conc_relacionado
+      )
     `)
     .eq('kit_id', kitRow.id);
 
   if (error) throw tiparError(error);
 
-  const componentes = (items ?? []).map(i => ({
-    cod:          i.item_cod,
-    nom:          i.stock_insumos?.nom ?? null,
-    unidad:       i.stock_insumos?.unidad ?? null,
-    cantidad:     Number(i.cantidad),
-    stock_actual: Number(i.stock_insumos?.stock ?? 0),
-    precio_unit:  Number(i.stock_insumos?.precio_unit ?? 0)
-  }));
+  // 2. Recolectar los códigos de concentrados relacionados
+  const codigosConcentrados = (items ?? [])
+    .map(i => i.stock_insumos?.insumo_conc_relacionado)
+    .filter(Boolean);
+
+  // 3. Traer los concentrados en una sola consulta
+  let mapaConcentrados = {};
+  if (codigosConcentrados.length > 0) {
+    const { data: concs, error: errConc } = await supabase
+      .from('stock_insumos')
+      .select('cod, precio_unit, factor_dilucion')
+      .in('cod', codigosConcentrados);
+
+    if (errConc) throw tiparError(errConc);
+
+    mapaConcentrados = Object.fromEntries(
+      (concs ?? []).map(c => [c.cod, c])
+    );
+  }
+
+  // 4. Armar componentes con el precio del concentrado resuelto
+  const componentes = (items ?? []).map(i => {
+    const si = i.stock_insumos;
+    const codConc = si?.insumo_conc_relacionado;
+    const conc = codConc ? mapaConcentrados[codConc] : null;
+
+    return {
+      cod:                i.item_cod,
+      nom:                si?.nom ?? null,
+      unidad:             si?.unidad ?? null,
+      cantidad:           Number(i.cantidad),
+      stock_actual:       Number(si?.stock ?? 0),
+      precio_unit:        Number(si?.precio_unit ?? 0),
+      tipo:               si?.tipo ?? null,
+      factor_dilucion:    si?.factor_dilucion ?? null,
+      precio_concentrado: Number(conc?.precio_unit ?? 0) || null
+    };
+  });
 
   const max_armables     = calcularMaxArmables(componentes);
-  const precio_calculado = calcularPrecioKit(componentes);
+  const costo_base       = calcularCostoBase(componentes);
+  const margen           = Number(kitRow.margen ?? 0);
+  const precio_calculado = calcularPrecioKit(componentes, margen);
 
   return {
     id:            kitRow.id,
@@ -83,6 +149,8 @@ async function hidratarKit(kitRow) {
     categoria:     kitRow.categoria,
     descripcion:   kitRow.descripcion,
     activo:        kitRow.activo,
+    margen:        margen,
+    costo_base,
     componentes,
     max_armables,
     precio_calculado,
@@ -116,14 +184,14 @@ export async function obtenerKit(id) {
   return hidratarKit(data);
 }
 
-export async function crearKit({ id, nombre, categoria, descripcion = null, items }) {
+export async function crearKit({ id, nombre, categoria, descripcion = null, margen = 0.5, items }) {
   if (!Array.isArray(items) || items.length === 0) {
     throw { code: 'KIT_SIN_ITEMS', detalle: 'un kit debe tener al menos 1 componente' };
   }
 
   const { error: errKit } = await supabase
     .from('kits')
-    .insert({ id, nombre, categoria, descripcion });
+    .insert({ id, nombre, categoria, descripcion, margen });
 
   if (errKit) throw tiparError(errKit);
 
@@ -133,7 +201,6 @@ export async function crearKit({ id, nombre, categoria, descripcion = null, item
   });
 
   if (errRpc) {
-    // Rollback manual del kit huérfano
     await supabase.from('kits').delete().eq('id', id);
     throw tiparError(errRpc);
   }
@@ -155,11 +222,10 @@ export async function actualizarKitItems(kit_id, items) {
   return obtenerKit(kit_id);
 }
 
-/* NUEVA: actualiza datos básicos del kit (nombre, categoría, descripción, activo) */
 export async function actualizarKit(id, datos) {
   if (!id) throw { code: 'KIT_NO_EXISTE', detalle: 'id requerido' };
 
-  const permitidos = ['nombre', 'categoria', 'descripcion', 'activo'];
+  const permitidos = ['nombre', 'categoria', 'descripcion', 'activo', 'margen'];
   const limpio = Object.fromEntries(
     Object.entries(datos ?? {}).filter(([k, v]) =>
       permitidos.includes(k) && v !== undefined
