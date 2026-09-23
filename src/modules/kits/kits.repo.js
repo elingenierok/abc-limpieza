@@ -18,10 +18,6 @@ export function calcularMaxArmables(componentes) {
 
 /* =========================================================
    F-010 · costo y precio del kit (Margen Real)
-   costo_unitario de un LIQUIDO_DIL = precio_concentrado / factor_dilucion
-   costo_base = suma(costo_unitario × cantidad) de todos los componentes
-   precio_venta = costo_base / (1 - margen)   [margen real, no markup]
-   Redondeo a la centena.
    ========================================================= */
 export const REDONDEO = 100;
 
@@ -30,18 +26,15 @@ export function calcularCostoUnitario(componente) {
   const cantidad = Number(componente.cantidad ?? 0);
   if (!(cantidad > 0)) return 0;
 
-  // Diluido: usar precio del concentrado relacionado ÷ factor
   if (tipo === 'LIQUIDO_DIL') {
     const precioConc = Number(componente.precio_concentrado ?? 0);
     const factor = Number(componente.factor_dilucion ?? 0);
     if (precioConc > 0 && factor > 1) {
       return (precioConc / factor) * cantidad;
     }
-    // Fallback: si no hay concentrado relacionado, usar precio_unit directo
     return Number(componente.precio_unit ?? 0) * cantidad;
   }
 
-  // Packaging, concentrado u otro: precio_unit directo
   return Number(componente.precio_unit ?? 0) * cantidad;
 }
 
@@ -57,7 +50,6 @@ export function calcularPrecioKit(componentes, margen = 0, redondeo = REDONDEO) 
   const m = Number(margen);
   let precio;
   if (!Number.isFinite(m) || m <= 0 || m >= 1) {
-    // Sin margen: el precio es igual al costo
     precio = costoBase;
   } else {
     precio = costoBase / (1 - m);
@@ -65,6 +57,17 @@ export function calcularPrecioKit(componentes, margen = 0, redondeo = REDONDEO) 
 
   if (redondeo <= 0) return Number(precio.toFixed(2));
   return Math.round(precio / redondeo) * redondeo;
+}
+
+/* =========================================================
+   NUEVA · Costo de envases (sólo componentes tipo PACKAGING)
+   Se usa para calcular el descuento por devolución.
+   ========================================================= */
+export function calcularCostoEnvases(componentes) {
+  if (!Array.isArray(componentes) || componentes.length === 0) return 0;
+  return componentes
+    .filter(c => c.tipo === 'PACKAGING')
+    .reduce((acc, c) => acc + calcularCostoUnitario(c), 0);
 }
 
 /* Normaliza error de Supabase */
@@ -85,7 +88,6 @@ function tiparError(err) {
 async function hidratarKit(kitRow) {
   if (!kitRow) return null;
 
-  // 1. Traer items + datos del insumo
   const { data: items, error } = await supabase
     .from('kit_items')
     .select(`
@@ -99,12 +101,10 @@ async function hidratarKit(kitRow) {
 
   if (error) throw tiparError(error);
 
-  // 2. Recolectar códigos de concentrados relacionados
   const codigosConcentrados = (items ?? [])
     .map(i => i.stock_insumos?.insumo_conc_relacionado)
     .filter(Boolean);
 
-  // 3. Traer concentrados con precio Y factor
   let mapaConcentrados = {};
   if (codigosConcentrados.length > 0) {
     const { data: concs, error: errConc } = await supabase
@@ -119,7 +119,6 @@ async function hidratarKit(kitRow) {
     );
   }
 
-  // 4. Armar componentes con datos del concentrado resueltos
   const componentes = (items ?? []).map(i => {
     const si = i.stock_insumos;
     const codConc = si?.insumo_conc_relacionado;
@@ -140,6 +139,7 @@ async function hidratarKit(kitRow) {
 
   const max_armables     = calcularMaxArmables(componentes);
   const costo_base       = calcularCostoBase(componentes);
+  const costo_envases    = calcularCostoEnvases(componentes);
   const margen           = Number(kitRow.margen ?? 0);
   const precio_calculado = calcularPrecioKit(componentes, margen);
 
@@ -151,6 +151,7 @@ async function hidratarKit(kitRow) {
     activo:        kitRow.activo,
     margen:        margen,
     costo_base,
+    costo_envases,
     componentes,
     max_armables,
     precio_calculado,
