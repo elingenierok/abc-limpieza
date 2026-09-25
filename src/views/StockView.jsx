@@ -37,6 +37,24 @@ function formatearNumero(n) {
   return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(n);
 }
 
+/* Emoji según tipo y prefijo del código */
+function emojiParaInsumo(insumo) {
+  if (!insumo) return '📦';
+  if (insumo.tipo === 'LIQUIDO_CONC') return '🧪';
+  if (insumo.tipo === 'LIQUIDO_DIL')  return '💧';
+  if (insumo.tipo === 'KIT_ARMADO')   return '🧴';
+  if (insumo.tipo === 'PACKAGING') {
+    const cod = insumo.cod ?? '';
+    if (cod.startsWith('ENV-'))   return '🍶';
+    if (cod.startsWith('TAPA-'))  return '🔘';
+    if (cod.startsWith('ETQ-'))   return '🏷️';
+    if (cod.startsWith('CAJA-'))  return '📦';
+    if (cod.startsWith('BOLSA-')) return '🛍️';
+    return '📦';
+  }
+  return '📦';
+}
+
 export default function StockView() {
   const [insumos, setInsumos] = useState([]);
   const [cargando, setCargando] = useState(true);
@@ -281,6 +299,7 @@ export default function StockView() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm leading-none shrink-0">{emojiParaInsumo(i)}</span>
                       <span className="font-bold text-sm text-slate-200 truncate">
                         {i.nom}
                       </span>

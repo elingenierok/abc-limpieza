@@ -1,6 +1,6 @@
 # Proyecto ABC de la Limpieza — Bitácora
 
-**Última actualización:** 2026-09-23 (noche)
+**Última actualización:** 2026-09-25 (noche)
 **URL pública:** https://elingenierok.github.io/abc-limpieza/
 **Repositorio:** https://github.com/elingenierok/abc-limpieza
 
@@ -24,9 +24,9 @@
 |---|---|---|---|---|
 | Auth | ✅ | ✅ | ✅ | Funcionando |
 | Dashboard | ✅ | ✅ | ✅ | Funcionando |
-| Stock | ✅ | ✅ | ✅ | Funcionando (crear + editar + movimiento + producir + filtros) |
+| Stock | ✅ | ✅ | ✅ | Funcionando (crear + editar + movimiento + producir + filtros + reservado + disponible) |
 | Calculadora | N/A | ✅ | ✅ | Funcionando (sólo cálculo) |
-| Pedidos | ✅ | ✅ | ✅ | Funcionando (listar + despachar + cancelar) |
+| Pedidos | ✅ | ✅ | ✅ | Funcionando (crear + editar + despachar + cancelar + reserva de stock) |
 | Clientes | ✅ | ✅ | ✅ | Funcionando (listar + crear + editar) |
 | Kits | ✅ | ✅ | ✅ | Funcionando (listar + crear + editar + eliminar + packaging + margen) |
 | Compras | ✅ | ✅ | ❌ | Sin vista |
@@ -83,16 +83,17 @@
 | `src/components/ProduccionModal.jsx` | Ejecutar dilución de concentrado → diluido |
 | `src/components/KitModal.jsx` | Crear/editar kit, componentes y margen |
 | `src/components/ClienteModal.jsx` | Crear/editar cliente con direcciones |
-| `src/components/CrearPedidoModal.jsx` | Armar pedido (hoy sólo insumos sueltos) |
+| `src/components/CrearPedidoModal.jsx` | Armar pedido (kits + packaging + devolución + flete + validación de stock) |
+| `src/components/EditarPedidoModal.jsx` | Editar pedido antes de despachar (sólo PENDIENTE) |
 
 ### Frontend — Repositorios
 
 | Archivo | Función |
 |---|---|
 | `src/modules/auth/auth.repo.js` | Login (delegado a AuthContext) |
-| `src/modules/stock/stock.repo.js` | CRUD de insumos, movimientos, producción, F-001 y F-007 |
+| `src/modules/stock/stock.repo.js` | CRUD de insumos, movimientos, producción, F-001 y F-007, `stock_disponible` |
 | `src/modules/kits/kits.repo.js` | CRUD de kits, F-009 (armables), F-010 (precio), costo de envases |
-| `src/modules/pedidos/pedidos.repo.js` | Crear / despachar / cancelar pedidos |
+| `src/modules/pedidos/pedidos.repo.js` | Crear / editar / despachar / cancelar pedidos + parámetros |
 | `src/modules/clientes/clientes.repo.js` | CRUD de clientes y direcciones |
 | `src/modules/compras/compras.repo.js` | Proveedores + órdenes de compra (sin vista) |
 | `src/modules/reportes/reportes.repo.js` | Ranking + valorización + resumen (sin vista) |
@@ -103,10 +104,10 @@
 |---|---|
 | `src/views/LoginView.jsx` | Login |
 | `src/views/Dashboard.jsx` | Panel de KPIs |
-| `src/views/StockView.jsx` | Stock con filtros, badges, acciones |
+| `src/views/StockView.jsx` | Stock con filtros, badges, acciones, reservado y disponible |
 | `src/views/CalculadoraView.jsx` | 2 modos de cálculo de dilución |
 | `src/views/KitsView.jsx` | Listado de kits con precio y armables |
-| `src/views/PedidosView.jsx` | Listado de pedidos + despachar/cancelar |
+| `src/views/PedidosView.jsx` | Listado de pedidos + editar/despachar/cancelar |
 | `src/views/ClientesView.jsx` | Listado de clientes con buscador |
 | `src/views/Placeholder.jsx` | Vista temporal para módulos sin UI |
 
@@ -126,6 +127,8 @@
 | `supabase/migrations/011_packaging_y_kits.sql` | 9 insumos de packaging + kits actualizados |
 | `supabase/migrations/012_margen_por_kit.sql` | Columna `margen` en `kits` |
 | `supabase/migrations/013_opciones_pedido.sql` | `devuelve_envases`, `flete`, `descuento_devolucion` en pedidos + `descuento_devolucion_pct` en parámetros |
+| `supabase/migrations/014_item_devuelve_envases.sql` | Columna `devuelve_envases` en `pedido_items` |
+| `supabase/migrations/015_stock_reservado.sql` | Columna `stock_reservado` en `stock_insumos` + RPC `actualizar_pedido` |
 
 **Nota:** falta `006_*.sql` (nunca se creó).
 
@@ -140,13 +143,16 @@
 | `cod` | text | NO | — | PK. Slug del insumo |
 | `nom` | text | NO | — | Nombre visible |
 | `unidad` | text | NO | — | `L` / `U` / `PAR` / `KG` |
-| `stock` | numeric | NO | 0 | Check ≥ 0 |
+| `stock` | numeric | NO | 0 | Check ≥ 0. Stock FÍSICO real |
+| `stock_reservado` | numeric | NO | 0 | Check ≥ 0. Reservado por pedidos PENDIENTES |
 | `minimo` | numeric | NO | 0 | Check ≥ 0 |
 | `consumo_diario` | numeric | NO | 0 | Check ≥ 0 |
 | `precio_unit` | numeric | NO | 0 | Check ≥ 0 |
 | `factor_dilucion` | numeric | SÍ | — | Check > 1 si no nulo |
 | `insumo_conc_relacionado` | text | SÍ | — | FK a `stock_insumos.cod` |
 | `tipo` | text | SÍ | — | `LIQUIDO_CONC` / `LIQUIDO_DIL` / `PACKAGING` / `KIT_ARMADO` |
+
+**Importante:** `stock_disponible = stock − stock_reservado`. Es VIRTUAL, no se guarda.
 
 ### `movimientos`
 
@@ -251,6 +257,7 @@ PK compuesta: (`kit_id`, `item_cod`).
 | `item_cod` | text | NO | FK polimórfica por trigger |
 | `cantidad` | numeric | NO | Check > 0 |
 | `precio_unit` | numeric | NO | Default 0 |
+| `devuelve_envases` | boolean | NO | Default false |
 
 ### `proveedores`
 
@@ -304,9 +311,10 @@ PK compuesta: (`kit_id`, `item_cod`).
 | `solo_admin_operador()` | Valida rol, raise si no autorizado |
 | `registrar_movimiento(...)` | Registra movimiento y actualiza stock atómicamente |
 | `reemplazar_kit_items(...)` | Reemplaza componentes de un kit |
-| `crear_pedido(...)` | Crea pedido + items con monto calculado |
-| `despachar_pedido(...)` | Descuenta stock y cambia estado a ENTREGADO |
-| `cancelar_pedido(...)` | Cancela pedido (valida estado) |
+| `crear_pedido(...)` | Crea pedido + items. **Reserva stock.** Acepta `devuelve_envases`, `flete`, `descuento_devolucion` y `devuelve_envases` por línea |
+| `despachar_pedido(...)` | **Baja stock físico + libera reserva.** Cambia estado a ENTREGADO |
+| `cancelar_pedido(...)` | **Libera reserva.** Cambia estado a CANCELADO |
+| `actualizar_pedido(...)` | **Reemplaza items y ajusta delta de reserva.** Sólo PENDIENTE |
 | `crear_cliente_completo(...)` | Cliente + direcciones en transacción |
 | `actualizar_cliente_completo(...)` | Idem + reemplazo de direcciones |
 | `crear_orden_compra(...)` | OC + items + monto |
@@ -323,6 +331,30 @@ PK compuesta: (`kit_id`, `item_cod`).
 |---|---|---|
 | `trg_validar_pedido_item` | `pedido_items` | Valida que `item_cod` exista según tipo |
 | `trg_dir_principal` | `cliente_direcciones` | Sólo una dirección principal por cliente |
+
+---
+
+## Estados del pedido
+
+| Estado | Significado | ¿Reserva stock? | ¿Descuenta stock físico? |
+|---|---|---|---|
+| `BORRADOR` | Recién creado, sin confirmar | No | No |
+| `PENDIENTE` | Confirmado, esperando preparación | **Sí** | No |
+| `PREPARADO` | Alguien ya armó el pedido físicamente | Mantiene reserva | No |
+| `EN_CAMINO` | Cargado en el vehículo, en distribución | Mantiene reserva | No |
+| `ENTREGADO` | Entregado al cliente, cobrado | Libera reserva | **Sí** |
+| `CANCELADO` | Cancelado | Libera reserva | No |
+
+**Flujo normal:** BORRADOR → PENDIENTE → PREPARADO → EN_CAMINO → ENTREGADO.
+
+**En la práctica hoy se usan sólo PENDIENTE y ENTREGADO.** Los otros están disponibles para futuro.
+
+**Reglas:**
+- Al crear un pedido: estado = PENDIENTE, se reserva stock.
+- Al despachar: estado = ENTREGADO, se descuenta stock físico y se libera reserva.
+- Al cancelar: estado = CANCELADO, se libera reserva (no toca stock físico).
+- Un pedido ENTREGADO no se puede cancelar.
+- Sólo se pueden editar pedidos en PENDIENTE (o BORRADOR).
 
 ---
 
@@ -391,15 +423,39 @@ PK compuesta: (`kit_id`, `item_cod`).
 - `StockView.jsx` con filtro Packaging.
 - `kits.repo.js` con F-010 nueva (margen real + costo del concentrado).
 - `KitModal.jsx` con campo margen y cálculo correcto.
-- Bug resuelto: `precio_concentrado` y `factor_concentrado` ahora se resuelven en consulta separada (Supabase no auto-resuelve FK a la misma tabla).
+- Bug resuelto: `precio_concentrado` y `factor_concentrado` ahora se resuelven en consulta separada.
 
 ### Bloque 10 — Opciones de pedido + verificación de despacho
 
 - Migración `013`: `devuelve_envases`, `flete`, `descuento_devolucion` en `pedidos` + `descuento_devolucion_pct` en `parametros_negocio`.
-- `kits.repo.js` expone `costo_envases` por kit (función `calcularCostoEnvases`).
-- **Verificado empíricamente:** `despachar_pedido` ya descuenta packaging. No hubo que modificarlo.
-- Prueba end-to-end (crear pedido + despachar + verificar stock) exitosa.
-- Base limpiada: pedidos de prueba borrados, stock revertido a estado previo.
+- `kits.repo.js` expone `costo_envases` por kit.
+- Verificado empíricamente: `despachar_pedido` ya descuenta packaging.
+- Base limpiada: pedidos de prueba borrados.
+
+### Bloque 11 — Opciones por línea + modal nuevo
+
+- Migración `014`: `devuelve_envases` en `pedido_items`.
+- `crear_pedido` modificado: acepta 3 parámetros nuevos y guarda `devuelve_envases` por línea.
+- `pedidos.repo.js` actualizado.
+- `CrearPedidoModal.jsx` REESCRITO: kits + packaging + checks + validación de disponible.
+- Fix aplicado: input de cantidad fuerza enteros (`min="1"`, `Math.floor`).
+
+### Bloque 12 — Modelo de reserva de stock (COMPLETO)
+
+- **Migración `015`:** columna `stock_reservado` en `stock_insumos`.
+- **`stock.repo.js`:** `conDerivados` ahora calcula `stock_disponible = stock − stock_reservado`.
+- **`crear_pedido`:** explota kits, valida disponible, reserva stock (sube `stock_reservado`, no toca `stock`).
+- **`despachar_pedido`:** baja `stock` físico Y libera `stock_reservado`. Todo atómico.
+- **`cancelar_pedido`:** libera `stock_reservado` sin tocar `stock` físico.
+- **`actualizar_pedido` (NUEVO):** libera reserva vieja, valida disponible, reserva nueva, reemplaza items, recalcula monto. Sólo PENDIENTE.
+- **Bug resuelto:** `actualizar_pedido` con `temp tables` no liberaba la reserva vieja. Se reescribió con CTEs directas.
+- **`StockView.jsx`:** muestra Físico + Disponible + badge púrpura si hay reserva.
+- **`CrearPedidoModal.jsx`:** calcula requerimientos consolidados, valida contra `stock_disponible`, bloquea guardar si hay faltantes.
+- **`EditarPedidoModal.jsx` (NUEVO):** modal completo con todos los campos editables (excepto cliente). Validación de faltantes considera la reserva propia del pedido.
+- **`PedidosView.jsx`:** botón Editar en pedidos PENDIENTES. Badges "+ Flete" y "Dev. envases" si aplica.
+- **`pedidos.repo.js`:** nueva función `actualizarPedido`.
+
+**Verificado empíricamente end-to-end:** crear → editar → despachar → stock baja correctamente → reserva se libera.
 
 ---
 
@@ -414,45 +470,42 @@ PK compuesta: (`kit_id`, `item_cod`).
 | `DET-ULTRA-CONC` | Detergente Ultra Plus | 17 | $5.006 | x5 |
 | `DES-LISO-CONC` | Lisoform Plus | 1 | $12.100 | x51 |
 | `BAS-SUAV-CONC` | Suavizante Flores Silvestres | 10 | $13.326 | x10 |
-| `JAB-ROPA-CONC` | Jabón Azul Ropa | 20 | $6.663 | x5 |
+| `JAB-ROPA-CONC` | Jabón Azul Ropa | 13 | $6.663 | x5 |
 | `MUL-AZUL-CONC` | Multiuso Azul | 5 | $2.700 | x5 |
 | `DES-NAR-CONC` | Desengrasante Naranja | 5 | $3.780 | x5 |
 
-**Diluidos (6):**
+**Diluidos (6):** (stock cargado con movimientos de prueba)
 
 | Código | Nombre | Stock | Precio/L |
 |---|---|---|---|
-| `DET-ULTRA-DIL` | Detergente Ultra Plus | 15 | $0 |
-| `DES-LISO-DIL` | Lisoform Plus | 0 | $0 |
-| `BAS-SUAV-DIL` | Suavizante Flores Silvestres | 0 | $0 |
-| `JAB-ROPA-DIL` | Jabón Azul Ropa | 0 | $0 |
-| `MUL-AZUL-DIL` | Multiuso Azul | 0 | $0 |
-| `DES-NAR-DIL` | Desengrasante Naranja | 0 | $0 |
+| `DET-ULTRA-DIL` | Detergente Ultra Plus | 68.5 | $0 |
+| `DES-LISO-DIL` | Lisoform Plus | 30 | $0 |
+| `BAS-SUAV-DIL` | Suavizante Flores Silvestres | 60 | $0 |
+| `JAB-ROPA-DIL` | Jabón Azul Ropa | 69 | $0 |
+| `MUL-AZUL-DIL` | Multiuso Azul | 60 | $0 |
+| `DES-NAR-DIL` | Desengrasante Naranja | 60 | $0 |
 
-**Packaging (9):**
+**Packaging (9):** (stock cargado con movimientos de prueba)
 
-| Código | Nombre | Precio |
-|---|---|---|
-| `ENV-SLOT-500` | Botella Slot 500 cc PET | $500 |
-| `ENV-SLOT-600` | Botella Slot 600 cc PET | $550 |
-| `ENV-SLOT-1500` | Botella Slot 1.5 L PET | $1.200 |
-| `ENV-OIL-900` | Botella Oil 900 cc PET | $900 |
-| `TAPA-28410` | Tapa 28/410 con precinto y liner | $80 |
-| `ETQ-GENERICA` | Etiqueta genérica | $100 |
-| `CAJA-CARTON` | Caja de cartón | $100 |
-| `BOLSA-PLAST` | Bolsa plástica | $80 |
-| `BOLSA-TELA` | Bolsa de tela ecológica | $200 |
+| Código | Nombre | Stock | Precio |
+|---|---|---|---|
+| `ENV-SLOT-500` | Botella Slot 500 cc PET | 97 | $500 |
+| `ENV-SLOT-600` | Botella Slot 600 cc PET | 100 | $550 |
+| `ENV-SLOT-1500` | Botella Slot 1.5 L PET | 100 | $1.200 |
+| `ENV-OIL-900` | Botella Oil 900 cc PET | 100 | $900 |
+| `TAPA-28410` | Tapa 28/410 con precinto y liner | 397 | $80 |
+| `ETQ-GENERICA` | Etiqueta genérica | 197 | $100 |
+| `CAJA-CARTON` | Caja de cartón | 197 | $100 |
+| `BOLSA-PLAST` | Bolsa plástica | 200 | $80 |
+| `BOLSA-TELA` | Bolsa de tela ecológica | 100 | $200 |
 
-### Kits (3 + 1 basura)
+### Kits (3)
 
 | ID | Nombre | Margen | Componentes | Precio | Costo envases |
 |---|---|---|---|---|---|
 | `kit-a-hogar-basico` | Hogar Básico | 50% | 1 líquido + 4 packaging | $2.600 | $780 |
 | `kit-a-cocina-express` | Cocina Express | 50% | 2 líquidos + 4 packaging | $4.500 | $1.360 |
 | `kit-a-bano-diario` | Baño Diario | 50% | 2 líquidos + 4 packaging | $13.500 | $2.760 |
-| `kit-borrar` | KIT BORRAR | ? | ? | $14.500 | $580 |
-
-**Pendiente:** borrar `kit-borrar` (fue creado para pruebas).
 
 ### Parámetros de negocio (1)
 
@@ -480,62 +533,52 @@ PK compuesta: (`kit_id`, `item_cod`).
     precio_venta = costo_base / (1 − margen)    [margen real]
     precio_final = redondear_a_centena(precio_venta)
 
-**Ejemplo (Hogar Básico, margen 50%):**
+---
 
-    Líquido: 0.5 L × ($5.006 / 5)      = $500,60
-    Botella: 1 × $500                  = $500
-    Tapa:    1 × $80                   = $80
-    Etiqueta: 1 × $100                 = $100
-    Caja:    1 × $100                  = $100
-    Costo base = $1.280,60
-    Precio = $1.280,60 / 0.5           = $2.561,20
-    Redondeado = $2.600
+## Fórmula del pedido
+
+    precio_base = suma(precio_item × cantidad)                 [kits + packaging suelto]
+    descuento_linea = costo_envases_kit × cantidad × 0.8       [sólo si es KIT y devuelve_envases=true]
+    descuento_total = suma(descuento_linea)
+    neto = precio_base − descuento_total
+    flete = parametros_negocio.costo_logistica (si el check está tildado)
+    monto = neto + flete
+
+**El descuento por devolución sólo afecta al `monto`. No afecta stock.**
 
 ---
 
-## Fórmula del pedido (a implementar)
+## Fórmula de reserva de stock
 
-    precio_base = suma(precio_kit × cantidad)
-    costo_envases_total = suma(costo_envases_kit × cantidad)
-    descuento_devolucion = devuelve_envases ? costo_envases_total × descuento_devolucion_pct : 0
-    monto = precio_base − descuento_devolucion + flete
+    stock_disponible = stock − stock_reservado
 
-**Importante:** el descuento por devolución sólo afecta al `monto`. No afecta stock. Los envases se descuentan siempre al despachar.
-
----
-
-## Próxima tarea (al retomar)
-
-**Paso C' — Modificar `crear_pedido` (RPC) para aceptar `devuelve_envases`, `flete`, `descuento_devolucion`.**
-
-**Decisión pendiente:** Opción A (cálculo en frontend) vs Opción B (cálculo en RPC).
-
-- **A. Frontend calcula, RPC guarda.** Más simple. Reutiliza lógica de `kits.repo.js`.
-- **B. RPC calcula todo.** Más robusto. Requiere SQL más complejo.
-
-**Recomendación:** A.
-
-**Y antes de arrancar:**
-
-- Borrar `kit-borrar` (con `select public.reemplazar_kit_items('kit-borrar', '[]'::jsonb);` no funciona porque rechaza vacío. Hacer `delete from kit_items where kit_id = 'kit-borrar'; delete from kits where id = 'kit-borrar';`).
-- Confirmar Opción A o B.
-
-**Después:**
-
-- **Paso D:** Reescribir `CrearPedidoModal.jsx` con kits + checks (devolución, flete).
-- **Paso E:** `PedidosView.jsx` muestra las opciones aplicadas.
+**Al crear pedido:** `stock_reservado = stock_reservado + cantidad_requerida` (por insumo).
+**Al despachar:** `stock = stock − cantidad_requerida` Y `stock_reservado = stock_reservado − cantidad_requerida`.
+**Al cancelar:** sólo `stock_reservado = stock_reservado − cantidad_requerida`.
 
 ---
 
 ## Ideas a futuro
 
+### Botón "Ver resumen" en tarjetas de pedido (NUEVO)
+
+**Objetivo:** desde la lista de pedidos, poder ver el detalle completo sin abrir el modal de edición.
+
+**Qué debería mostrar:**
+
+- Ítems del pedido (kits + cantidades + packaging suelto).
+- Checks aplicados (devolución de envases por línea).
+- Subtotal, descuento por devolución, flete, total.
+- Estado del pedido y fechas.
+- Cliente y observaciones.
+
+**Idea:** botón "Ver detalle" o ícono de ojo que abra un modal liviano de sólo lectura.
+
+**Estado:** pendiente implementar.
+
 ### Iconos de clasificación visual rápida
 
-**Objetivo:** facilitar la búsqueda y clasificación visual dentro de las listas de Stock.
-
-**Idea:** incorporar iconos o emojis según el tipo de insumo:
-
-| Tipo | Icono sugerido |
+| Tipo | Icono |
 |---|---|
 | `LIQUIDO_CONC` | 🧪 |
 | `LIQUIDO_DIL` | 💧 |
@@ -545,9 +588,7 @@ PK compuesta: (`kit_id`, `item_cod`).
 | `PACKAGING` - cajas | 📦 |
 | `KIT_ARMADO` | 🧴 |
 
-**Y por categoría de kit:**
-
-| Categoría | Icono |
+| Categoría kit | Icono |
 |---|---|
 | Hogar | 🏠 |
 | Cocina | 🍴 |
@@ -557,52 +598,19 @@ PK compuesta: (`kit_id`, `item_cod`).
 | Pileta | 🏊 |
 | Patio | ⛱️ |
 
-**Nota:** los iconos se agregan a nivel frontend (no a la base). Se resuelven por `tipo` del insumo o `categoria` del kit.
+### Filtro "Kits Armados" en Stock
 
-### Filtro "Kits" en Stock
-
-Cuando se implemente `KIT_ARMADO` como tipo real de insumo, agregar el filtro correspondiente en `StockView.jsx`:
+Cuando se implemente `KIT_ARMADO`:
 
     [Todos] [Concentrados] [Diluidos] [Packaging] [Kits Armados]
 
-**Estado:** pendiente de implementar el modelo `KIT_ARMADO` real.
-
 ### Armado de kits por adelantado
 
-**Decisión aceptada (Camino 1):** no se refleja en stock. Los kits armados no tienen stock propio.
-
-**A futuro:** crear insumo `KIT-XXX-ARMADO` y registrar 2 movimientos:
-
-- Baja componentes (líquido + packaging).
-- Alta del kit armado.
-
-### Modelo de 4 tipos de insumo
-
-| tipo | Qué agrupa | Ejemplos |
-|---|---|---|
-| `LIQUIDO_CONC` | Concentrados líquidos | `DET-ULTRA-CONC` |
-| `LIQUIDO_DIL` | Diluidos listos para vender | `DET-ULTRA-DIL` |
-| `PACKAGING` | Envases, tapas, etiquetas, bolsas, cajas | `ENV-SLOT-500`, `TAPA-28410` |
-| `KIT_ARMADO` | Kits pre-armados (a futuro) | `KIT-COCINA-ARMADO` |
-
-**Estado:** los 3 primeros ya están implementados. `KIT_ARMADO` pendiente.
-
-### Opciones en la venta
-
-Al crear un pedido, se podrán tildar:
-
-| Opción | Efecto |
-|---|---|
-| **Devuelve envases** | Aplica descuento (80% del costo de envases) al monto |
-| **Flete** | Suma el costo de logística al monto |
-
-**Estado:** columnas creadas en BD. Pendiente la implementación en `CrearPedidoModal.jsx`.
+Hoy no se refleja en stock. A futuro: crear insumo `KIT-XXX-ARMADO` y registrar 2 movimientos (baja componentes, alta armado).
 
 ### Calculadora de dilución inversa
 
-Ya implementada parcialmente en `CalculadoraView.jsx`.
-
-**Pendiente:** botón "Ejecutar producción" desde la calculadora, que dispare `registrarProduccion` directamente.
+`CalculadoraView.jsx` ya tiene los 2 modos. Pendiente: botón "Ejecutar producción" que dispare `registrarProduccion`.
 
 ---
 
@@ -610,19 +618,17 @@ Ya implementada parcialmente en `CalculadoraView.jsx`.
 
 | # | Tarea | Prioridad | Complejidad |
 |---|---|---|---|
-| 1 | **Borrar `kit-borrar`** (limpieza) | Alta | Trivial |
-| 2 | **Modificar `crear_pedido` (RPC)** con `devuelve_envases`, `flete`, `descuento_devolucion` | Alta | Media |
-| 3 | **Reescribir `CrearPedidoModal.jsx`** con kits + checks | Alta | Media |
-| 4 | **`PedidosView.jsx`** muestra las opciones aplicadas | Media | Baja |
-| 5 | **Vista Parámetros** (editar desde la app) | Media | Baja |
-| 6 | **Detalle de pedido** | Alta | Baja |
-| 7 | **Reportes** (ranking ventas + valorización) | Media | Baja |
-| 8 | **Compras** (proveedores + órdenes) | Media | Alta |
-| 9 | **Auth por rol** (repartidor ve sólo agenda) | Media | Media |
-| 10 | **Agenda** (calendario de entregas) | Baja | Alta |
-| 11 | **Módulo Contable** | Baja | Alta |
-| 12 | **Módulo Armado de kits** (KIT_ARMADO) | Baja | Alta |
-| 13 | **Iconos de clasificación visual** | Baja | Baja |
+| 1 | **Botón "Ver resumen" en tarjetas de pedido** | Alta | Baja |
+| 2 | **Vista Parámetros** (editar desde la app) | Alta | Baja |
+| 3 | **Cargar precios reales de packaging** | Alta | Trivial |
+| 4 | **Precios de venta de diluidos** (hoy en $0) | Media | Baja |
+| 5 | **Reportes** (ranking ventas + valorización) | Media | Baja |
+| 6 | **Compras** (proveedores + órdenes) | Media | Alta |
+| 7 | **Auth por rol** | Media | Media |
+| 8 | **Agenda** | Baja | Alta |
+| 9 | **Módulo Contable** | Baja | Alta |
+| 10 | **Módulo Armado de kits** (KIT_ARMADO) | Baja | Alta |
+| 11 | **Iconos de clasificación visual** | Baja | Baja |
 
 ---
 
@@ -630,20 +636,17 @@ Ya implementada parcialmente en `CalculadoraView.jsx`.
 
 | # | Advertencia | Gravedad |
 |---|---|---|
-| 1 | El modal de pedidos no permite agregar kits | Alta |
-| 2 | El detalle del pedido no es visible | Alta |
-| 3 | Los precios de venta de diluidos están en 0 | Alta |
-| 4 | Los precios de packaging son ficticios (falta cargar reales) | Alta |
-| 5 | `crear_pedido` no acepta `devuelve_envases`, `flete`, `descuento_devolucion` todavía | Alta |
-| 6 | Existe `kit-borrar` en la base (basura de pruebas) | Baja |
-| 7 | El armado de kits por adelantado no se refleja en stock | Media |
-| 8 | `registrarProduccion` no es 100% atómico (2 llamadas seguidas) | Media |
-| 9 | Todos los usuarios ven todo (no hay restricción por rol) | Media |
-| 10 | Los kits no guardan versión histórica | Media |
-| 11 | Sin tests de integración real | Media |
-| 12 | Categorías de kits sin normalizar | Baja |
-| 13 | URLs con `#` (HashRouter) | Cosmético |
-| 14 | Deploy manual | Baja |
+| 1 | Los precios de venta de diluidos están en 0 | Alta |
+| 2 | Los precios de packaging son ficticios | Alta |
+| 3 | El detalle del pedido no es visible desde la lista | Alta |
+| 4 | El armado de kits por adelantado no se refleja en stock | Media |
+| 5 | `registrarProduccion` no es 100% atómico | Media |
+| 6 | Todos los usuarios ven todo (no hay restricción por rol) | Media |
+| 7 | Los kits no guardan versión histórica | Media |
+| 8 | Sin tests de integración real | Media |
+| 9 | Categorías de kits sin normalizar | Baja |
+| 10 | URLs con `#` (HashRouter) | Cosmético |
+| 11 | Deploy manual | Baja |
 
 ---
 
@@ -651,10 +654,10 @@ Ya implementada parcialmente en `CalculadoraView.jsx`.
 
 ### Insumos — Sufijos
 
-| Sufijo | Tipo | Significado |
-|---|---|---|
-| `-CONC` | Concentrado | Materia prima líquida |
-| `-DIL` | Diluido | Líquido listo para vender |
+| Sufijo | Tipo |
+|---|---|
+| `-CONC` | Concentrado |
+| `-DIL` | Diluido |
 
 ### Otros prefijos
 
@@ -665,12 +668,12 @@ Ya implementada parcialmente en `CalculadoraView.jsx`.
 | `ETQ-` | Etiqueta |
 | `BOLSA-` | Bolsa |
 | `CAJA-` | Caja |
-| `KIT-...-ARMADO` | Kit pre-armado (a futuro) |
+| `KIT-...-ARMADO` | Kit pre-armado |
 
 ### Kits
 
-- **ID:** slug del nombre en minúsculas (`kit-a-hogar-basico`).
-- **Categorías sugeridas:** Hogar, Cocina, Bano, Pisos, Exteriores, Pileta, Patio.
+- **ID:** slug del nombre en minúsculas.
+- **Categorías:** Hogar, Cocina, Bano, Pisos, Exteriores, Pileta, Patio.
 - **Margen default:** 50%.
 
 ### Estados de stock
@@ -696,7 +699,9 @@ Ya implementada parcialmente en `CalculadoraView.jsx`.
 | F-013 | `concentrado_necesario = litros_finales / factor_dilucion` | `CalculadoraView.jsx` | Activa |
 | F-014 | `costo_diluido = precio_concentrado / factor_dilucion` | `kits.repo.js` | Activa |
 | F-015 | `costo_envases_kit = suma(precio_unit × cantidad)` de componentes `PACKAGING` | `kits.repo.js` | Activa |
-| F-016 | `monto_pedido = precio_base − descuento_devolucion + flete` | `CrearPedidoModal.jsx` (a implementar) | Pendiente |
+| F-016 | `monto_pedido = precio_base − descuento_devolucion + flete` | `CrearPedidoModal.jsx` | Activa |
+| F-017 | `stock_disponible = stock − stock_reservado` | `stock.repo.js` | Activa |
+| F-018 | `descuento_linea = costo_envases_kit × cantidad × descuento_devolucion_pct` | `CrearPedidoModal.jsx` | Activa |
 
 ---
 
@@ -715,9 +720,11 @@ En 30 segundos la URL pública refleja los cambios.
 
 | Fecha | Qué se hizo |
 |---|---|
-| 2026-09-23 (noche) | Migración 013 (opciones de pedido). `kits.repo.js` con `costo_envases`. Verificación empírica de `despachar_pedido`. Prueba end-to-end exitosa. Base limpiada |
-| 2026-09-23 (tarde) | Migración 010 (tipo + parámetros). Migración 011 (packaging). Migración 012 (margen). Precio del kit con margen real. Bug del `precio_concentrado` resuelto |
-| 2026-09-23 | Actualización completa del `.md` con árboles de archivos y BD. Definición del modelo de 4 tipos |
+| 2026-09-25 (noche) | Bloque 12: Modelo de reserva COMPLETO. Migración 015. 4 RPCs modificadas. `StockView` muestra disponible. `CrearPedidoModal` valida. `EditarPedidoModal` creado. `PedidosView` con botón Editar. Verificado end-to-end |
+| 2026-09-25 | Bloque 11: Migración 014. `crear_pedido` con opciones. `CrearPedidoModal` reescrito |
+| 2026-09-23 (noche) | Migración 013 (opciones de pedido). `kits.repo.js` con `costo_envases`. Verificación de `despachar_pedido` |
+| 2026-09-23 (tarde) | Migración 010 (tipo + parámetros). Migración 011 (packaging). Migración 012 (margen) |
+| 2026-09-23 | Actualización completa del `.md` con árboles de archivos y BD |
 | 2026-09-22 | Módulo Calculadora + Módulo Producción. Filtros por tipo en Stock |
 | 2026-09-18 | Deploy a GitHub Pages. HashRouter. `.gitignore` |
 

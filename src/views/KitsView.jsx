@@ -11,6 +11,32 @@ function formatearPrecio(n) {
   }).format(n ?? 0);
 }
 
+/* Emoji según categoría del kit */
+function emojiParaCategoria(categoria) {
+  const cat = (categoria ?? '').toLowerCase().trim();
+  const mapa = {
+    hogar:       '🏠',
+    casa:        '🏠',
+    cocina:      '🍴',
+    bano:        '🛁',
+    baño:        '🛁',
+    pisos:       '🧹',
+    piso:        '🧹',
+    exteriores:  '🌳',
+    exterior:    '🌳',
+    pileta:      '🏊',
+    piscina:     '🏊',
+    patio:       '⛱️',
+    jardin:      '🌿',
+    jardín:      '🌿',
+    lavadero:    '🧺',
+    auto:        '🚗',
+    vehiculo:    '🚗',
+    vehículo:    '🚗'
+  };
+  return mapa[cat] ?? '📦';
+}
+
 export default function KitsView() {
   const [kits, setKits] = useState([]);
   const [cargando, setCargando] = useState(true);
@@ -122,6 +148,9 @@ export default function KitsView() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0 flex-1 space-y-2">
                     <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm leading-none shrink-0">
+                        {emojiParaCategoria(k.categoria)}
+                      </span>
                       <span className="font-bold text-sm text-slate-200">{k.nombre}</span>
                       <span className="text-[10px] text-slate-500 uppercase bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded">
                         {k.categoria}

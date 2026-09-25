@@ -1,11 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
-  listarPedidos, despacharPedido, cancelarPedido, obtenerPedido
+  listarPedidos, avanzarEstadoPedido, obtenerPedido
 } from '../modules/pedidos/pedidos.repo.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import CrearPedidoModal from '../components/CrearPedidoModal.jsx';
 import EditarPedidoModal from '../components/EditarPedidoModal.jsx';
-import { Plus, CheckCircle, Clock, XCircle, AlertCircle, Edit2 } from 'lucide-react';
+import PedidoDetalleModal from '../components/PedidoDetalleModal.jsx';
+import {
+  Plus, CheckCircle, Clock, XCircle, AlertCircle, Edit2, Eye,
+  Package, Truck, BadgeCheck
+} from 'lucide-react';
 
 function formatearPrecio(n) {
   return new Intl.NumberFormat('es-AR', {
@@ -15,17 +19,41 @@ function formatearPrecio(n) {
   }).format(n ?? 0);
 }
 
+const ESTADOS = ['PENDIENTE', 'PREPARADO', 'EN_CAMINO', 'ENTREGADO', 'CANCELADO'];
+
+const BADGE_ESTADO = {
+  PENDIENTE:  'bg-amber-950/60 text-amber-400 border border-amber-800',
+  PREPARADO:  'bg-purple-950/60 text-purple-400 border border-purple-800',
+  EN_CAMINO:  'bg-sky-950/60 text-sky-400 border border-sky-800',
+  ENTREGADO:  'bg-emerald-950/60 text-emerald-400 border border-emerald-800',
+  CANCELADO:  'bg-red-950/60 text-red-400 border border-red-800'
+};
+
+function IconEstado({ estado }) {
+  if (estado === 'ENTREGADO') return <CheckCircle size={12} />;
+  if (estado === 'CANCELADO') return <XCircle size={12} />;
+  if (estado === 'EN_CAMINO') return <Truck size={12} />;
+  if (estado === 'PREPARADO') return <Package size={12} />;
+  return <Clock size={12} />;
+}
+
 export default function PedidosView() {
   const { usuario } = useAuth();
   const [pedidos, setPedidos] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
+  const [filtros, setFiltros] = useState([]);
 
   const [modalCrear, setModalCrear] = useState(false);
 
   const [modalEditar, setModalEditar] = useState(false);
   const [pedidoEditar, setPedidoEditar] = useState(null);
   const [cargandoEditar, setCargandoEditar] = useState(false);
+
+  const [modalDetalle, setModalDetalle] = useState(false);
+  const [pedidoDetalle, setPedidoDetalle] = useState(null);
+
+  const [procesando, setProcesando] = useState(false);
 
   useEffect(() => {
     cargarLista();
@@ -41,6 +69,46 @@ export default function PedidosView() {
       setError(err.detalle || 'Error al cargar los pedidos');
     } finally {
       setCargando(false);
+    }
+  };
+
+  /* =========================================================
+     Filtros
+     ========================================================= */
+  const toggleFiltro = (estado) => {
+    setFiltros(prev =>
+      prev.includes(estado) ? prev.filter(e => e !== estado) : [...prev, estado]
+    );
+  };
+
+  const contadores = useMemo(() => {
+    const c = { TOTAL: pedidos.length };
+    for (const e of ESTADOS) c[e] = 0;
+    for (const p of pedidos) {
+      if (c[p.estado] !== undefined) c[p.estado]++;
+    }
+    return c;
+  }, [pedidos]);
+
+  const pedidosFiltrados = useMemo(() => {
+    if (filtros.length === 0) return pedidos;
+    return pedidos.filter(p => filtros.includes(p.estado));
+  }, [pedidos, filtros]);
+
+  /* =========================================================
+     Acciones
+     ========================================================= */
+  const handleVerDetalle = async (id) => {
+    try {
+      const completo = await obtenerPedido(id);
+      if (!completo) {
+        alert('No se encontró el pedido.');
+        return;
+      }
+      setPedidoDetalle(completo);
+      setModalDetalle(true);
+    } catch (err) {
+      alert(`Error al cargar el pedido: ${err.detalle || err.code}`);
     }
   };
 
@@ -61,10 +129,19 @@ export default function PedidosView() {
     }
   };
 
-  const handleDespachar = async (id) => {
-    if (!confirm('¿Deseas despachar este pedido y descontar el stock?')) return;
+  const handleAvanzar = async (id, nuevoEstado) => {
+    const mensajes = {
+      PREPARADO: '¿Marcar este pedido como preparado?',
+      EN_CAMINO: '¿Cargar este pedido al móvil?',
+      ENTREGADO: '¿Confirmar la entrega? Se va a descontar el stock físico.',
+      CANCELADO: '¿Cancelar el pedido? Se va a liberar la reserva de stock.'
+    };
+
+    if (!confirm(mensajes[nuevoEstado])) return;
+
+    setProcesando(true);
     try {
-      await despacharPedido(id, usuario?.id);
+      await avanzarEstadoPedido(id, nuevoEstado, usuario?.id);
       await cargarLista();
     } catch (err) {
       if (err.code === 'STOCK_INSUFICIENTE' && Array.isArray(err.faltantes)) {
@@ -73,19 +150,75 @@ export default function PedidosView() {
           .join('\n');
         alert(`Stock insuficiente:\n${detalle}`);
       } else {
-        alert(`Error al despachar: ${err.code || err.detalle}`);
+        alert(`Error al cambiar estado: ${err.code || err.detalle}`);
       }
+    } finally {
+      setProcesando(false);
     }
   };
 
-  const handleCancelar = async (id) => {
-    if (!confirm('¿Seguro que deseas cancelar este pedido? La reserva de stock será liberada.')) return;
-    try {
-      await cancelarPedido(id);
-      await cargarLista();
-    } catch (err) {
-      alert(`Error al cancelar: ${err.code || err.detalle}`);
+  /* =========================================================
+     Botones por estado
+     ========================================================= */
+  const botonesDeEstado = (p) => {
+    const botones = [];
+
+    if (p.estado === 'PENDIENTE') {
+      botones.push({
+        label: 'Marcar preparado',
+        icon: Package,
+        color: 'bg-purple-600 hover:bg-purple-500 text-white',
+        onClick: () => handleAvanzar(p.id, 'PREPARADO')
+      });
+      botones.push({
+        label: 'Editar',
+        icon: Edit2,
+        color: 'bg-slate-800 hover:bg-slate-700 text-sky-400',
+        onClick: () => handleEditar(p.id),
+        disabled: cargandoEditar
+      });
+      botones.push({
+        label: 'Cancelar',
+        icon: null,
+        color: 'bg-slate-800 hover:bg-red-900/50 text-slate-400 hover:text-red-300',
+        onClick: () => handleAvanzar(p.id, 'CANCELADO')
+      });
+    } else if (p.estado === 'PREPARADO') {
+      botones.push({
+        label: 'Cargar al móvil',
+        icon: Truck,
+        color: 'bg-sky-600 hover:bg-sky-500 text-white',
+        onClick: () => handleAvanzar(p.id, 'EN_CAMINO')
+      });
+      botones.push({
+        label: 'Editar',
+        icon: Edit2,
+        color: 'bg-slate-800 hover:bg-slate-700 text-sky-400',
+        onClick: () => handleEditar(p.id),
+        disabled: cargandoEditar
+      });
+      botones.push({
+        label: 'Cancelar',
+        icon: null,
+        color: 'bg-slate-800 hover:bg-red-900/50 text-slate-400 hover:text-red-300',
+        onClick: () => handleAvanzar(p.id, 'CANCELADO')
+      });
+    } else if (p.estado === 'EN_CAMINO') {
+      botones.push({
+        label: 'Entregar',
+        icon: BadgeCheck,
+        color: 'bg-emerald-600 hover:bg-emerald-500 text-white',
+        onClick: () => handleAvanzar(p.id, 'ENTREGADO')
+      });
+      botones.push({
+        label: 'Cancelar',
+        icon: null,
+        color: 'bg-slate-800 hover:bg-red-900/50 text-slate-400 hover:text-red-300',
+        onClick: () => handleAvanzar(p.id, 'CANCELADO')
+      });
     }
+
+    return botones;
   };
 
   return (
@@ -103,6 +236,42 @@ export default function PedidosView() {
         </button>
       </div>
 
+      {/* Filtros */}
+      {pedidos.length > 0 && (
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => setFiltros([])}
+            className={`text-xs px-3 py-1.5 rounded-full border transition ${
+              filtros.length === 0
+                ? 'bg-slate-800 text-white border-sky-500'
+                : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800'
+            }`}
+          >
+            Todos ({contadores.TOTAL})
+          </button>
+          {ESTADOS.map(e => {
+            const n = contadores[e] ?? 0;
+            const activo = filtros.includes(e);
+            return (
+              <button
+                key={e}
+                onClick={() => toggleFiltro(e)}
+                disabled={n === 0}
+                className={`text-xs px-3 py-1.5 rounded-full border transition ${
+                  activo
+                    ? 'bg-sky-900/40 text-sky-300 border-sky-600'
+                    : n === 0
+                    ? 'bg-slate-900/50 text-slate-600 border-slate-800 cursor-not-allowed'
+                    : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800'
+                }`}
+              >
+                {e} ({n})
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {error && (
         <div className="bg-red-950/40 border border-red-800 text-red-300 text-xs rounded p-3 flex items-center gap-2">
           <AlertCircle size={16} /> {error}
@@ -115,11 +284,14 @@ export default function PedidosView() {
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-8 text-center text-slate-500 text-sm">
           No hay pedidos registrados en el sistema.
         </div>
+      ) : pedidosFiltrados.length === 0 ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-8 text-center text-slate-500 text-sm">
+          Sin resultados para los filtros seleccionados.
+        </div>
       ) : (
         <div className="grid gap-3">
-          {pedidos.map(p => {
-            const editable = p.estado === 'PENDIENTE' || p.estado === 'BORRADOR';
-            const accionable = editable;
+          {pedidosFiltrados.map(p => {
+            const botones = botonesDeEstado(p);
 
             return (
               <div key={p.id} className="bg-slate-900 border border-slate-800 rounded-lg p-4 flex items-center justify-between gap-4">
@@ -129,18 +301,8 @@ export default function PedidosView() {
                       {p.cliente?.razon_social || 'Cliente sin especificar'}
                     </span>
 
-                    <span className={`text-[10px] px-2 py-0.5 rounded uppercase font-medium flex items-center gap-1 ${
-                      p.estado === 'DESPACHADO' || p.estado === 'ENTREGADO'
-                        ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800'
-                        : p.estado === 'CANCELADO'
-                        ? 'bg-red-950/60 text-red-400 border border-red-800'
-                        : 'bg-amber-950/60 text-amber-400 border border-amber-800'
-                    }`}>
-                      {p.estado === 'DESPACHADO' || p.estado === 'ENTREGADO'
-                        ? <CheckCircle size={12}/>
-                        : p.estado === 'CANCELADO'
-                        ? <XCircle size={12}/>
-                        : <Clock size={12}/>}
+                    <span className={`text-[10px] px-2 py-0.5 rounded uppercase font-medium flex items-center gap-1 ${BADGE_ESTADO[p.estado] ?? BADGE_ESTADO.PENDIENTE}`}>
+                      <IconEstado estado={p.estado} />
                       {p.estado}
                     </span>
 
@@ -174,32 +336,29 @@ export default function PedidosView() {
                     </div>
                   </div>
 
-                  {accionable && (
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => handleEditar(p.id)}
-                        disabled={cargandoEditar}
-                        className="text-xs bg-slate-800 hover:bg-slate-700 text-sky-400 px-2 py-1 rounded transition flex items-center gap-1 disabled:opacity-50"
-                        title="Editar pedido"
-                      >
-                        <Edit2 size={12} /> Editar
-                      </button>
-                      <button
-                        onClick={() => handleDespachar(p.id)}
-                        className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded transition"
-                        title="Despachar y descontar stock"
-                      >
-                        Despachar
-                      </button>
-                      <button
-                        onClick={() => handleCancelar(p.id)}
-                        className="text-xs bg-slate-800 hover:bg-red-900/50 text-slate-400 hover:text-red-300 px-2 py-1 rounded transition"
-                        title="Cancelar pedido"
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  )}
+                  <div className="flex gap-1 flex-wrap justify-end">
+                    <button
+                      onClick={() => handleVerDetalle(p.id)}
+                      className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded transition flex items-center gap-1"
+                      title="Ver resumen"
+                    >
+                      <Eye size={12} />
+                    </button>
+
+                    {botones.map((b, i) => {
+                      const Icon = b.icon;
+                      return (
+                        <button
+                          key={i}
+                          onClick={b.onClick}
+                          disabled={procesando || b.disabled}
+                          className={`text-xs ${b.color} px-2 py-1 rounded transition flex items-center gap-1 disabled:opacity-50`}
+                        >
+                          {Icon && <Icon size={12} />} {b.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             );
@@ -221,6 +380,15 @@ export default function PedidosView() {
           setPedidoEditar(null);
         }}
         onPedidoActualizado={cargarLista}
+      />
+
+      <PedidoDetalleModal
+        isOpen={modalDetalle}
+        pedido={pedidoDetalle}
+        onClose={() => {
+          setModalDetalle(false);
+          setPedidoDetalle(null);
+        }}
       />
     </div>
   );

@@ -193,3 +193,19 @@ export async function actualizarPedido({
   if (error) throw tiparError(error);
   return obtenerPedido(pedido_id);
 }
+
+export async function avanzarEstadoPedido(pedido_id, nuevo_estado, usuario_id = null) {
+  const permitidos = ['PREPARADO','EN_CAMINO','ENTREGADO','CANCELADO'];
+  if (!permitidos.includes(nuevo_estado)) {
+    throw { code: 'INPUT_INVALIDO', detalle: `estado inválido: ${nuevo_estado}` };
+  }
+
+  const { data, error } = await supabase.rpc('avanzar_estado_pedido', {
+    p_pedido_id:    pedido_id,
+    p_nuevo_estado: nuevo_estado,
+    p_usuario_id:   usuario_id
+  });
+
+  if (error) throw tiparError(error);
+  return data;
+}
