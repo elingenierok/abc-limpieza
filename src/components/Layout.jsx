@@ -1,6 +1,7 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
+import logo from '../assets/logo.png';
 import {
   LayoutDashboard, Package, ShoppingCart, Calendar,
   Users, Truck, BarChart3, Menu, X, LogOut, Boxes, Calculator
@@ -31,8 +32,8 @@ export default function Layout() {
       {/* Sidebar escritorio */}
       <aside className="hidden md:flex md:flex-col justify-between bg-slate-900 border-r border-slate-800">
         <div>
-          <div className="px-4 py-4 border-b border-slate-800">
-            <h1 className="text-xs font-bold tracking-[0.15em] uppercase">Gestión Limpieza</h1>
+          <div className="px-4 py-6 border-b border-slate-800 flex items-center justify-center">
+            <img src={logo} alt="Logo" className="w-32 h-32 object-contain" />
           </div>
           <nav className="p-2 space-y-0.5">
             {NAV.map(({ to, label, Icon }) => (
@@ -66,17 +67,17 @@ export default function Layout() {
 
       {/* Header móvil */}
       <header className="md:hidden sticky top-0 z-20 flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-slate-800">
-        <h1 className="text-xs font-bold tracking-[0.15em] uppercase">Gestión Limpieza</h1>
+        <img src={logo} alt="Logo" className="w-10 h-10 object-contain" />
         <button
           onClick={() => setDrawer(v => !v)}
-          className="p-1 -mr-1 text-slate-300"
+          className="p-1 -mr-1 text-slate-300 shrink-0"
           aria-label="Menú"
         >
           {drawer ? <X size={20} /> : <Menu size={20} />}
         </button>
       </header>
 
-      {/* Drawer móvil (acceso a todos los módulos) */}
+      {/* Drawer móvil */}
       {drawer && (
         <div
           className="md:hidden fixed inset-0 z-30 bg-black/60"
@@ -87,8 +88,8 @@ export default function Layout() {
             onClick={e => e.stopPropagation()}
           >
             <nav>
-              <div className="px-4 pb-3 mb-2 border-b border-slate-800">
-                <p className="text-xs text-slate-400 truncate">{usuario?.email}</p>
+              <div className="px-4 py-4 mb-2 border-b border-slate-800 flex items-center justify-center">
+                <img src={logo} alt="Logo" className="w-24 h-24 object-contain" />
               </div>
               {NAV.map(({ to, label, Icon }) => (
                 <NavLink
@@ -107,6 +108,7 @@ export default function Layout() {
             </nav>
 
             <div className="p-4 border-t border-slate-800 mb-12">
+              <div className="text-[11px] text-slate-500 truncate mb-2 px-1">{usuario?.email}</div>
               <button
                 onClick={() => { setDrawer(false); logout(); }}
                 className="w-full flex items-center gap-3 text-sm text-red-400"

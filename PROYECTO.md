@@ -1,6 +1,6 @@
 # ABC de la Limpieza — Resumen del proyecto
 
-**Última actualización:** 2026-09-25
+**Última actualización:** 2026-09-25 (noche final)
 **URL:** https://elingenierok.github.io/abc-limpieza/
 **Repo:** https://github.com/elingenierok/abc-limpieza
 
@@ -22,7 +22,8 @@
 | Hosting | GitHub Pages |
 | Router | HashRouter (URLs con `#`) |
 | Deploy | `npm run deploy` (manual) |
-| Bundle | 544 KB (aviso de chunk size, no crítico) |
+| Bundle | ~553 KB (aviso de chunk size, no crítico) |
+| Logo | `src/assets/logo.png` · header + drawer + sidebar |
 
 ---
 
@@ -218,7 +219,7 @@ PENDIENTE → PREPARADO → EN_CAMINO → ENTREGADO
 | 5 | Sin restricción por rol en el frontend | Media |
 | 6 | Los kits no guardan versión histórica | Media |
 | 7 | Sin tests de integración real | Media |
-| 8 | Bundle JS pesa 544 KB | Baja |
+| 8 | Bundle JS pesa ~553 KB | Baja |
 | 9 | Deploy manual | Baja |
 
 ---
