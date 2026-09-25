@@ -1,6 +1,6 @@
 # Proyecto ABC de la Limpieza — Bitácora
 
-**Última actualización:** 2026-09-23
+**Última actualización:** 2026-09-23 (noche)
 **URL pública:** https://elingenierok.github.io/abc-limpieza/
 **Repositorio:** https://github.com/elingenierok/abc-limpieza
 
@@ -91,7 +91,7 @@
 |---|---|
 | `src/modules/auth/auth.repo.js` | Login (delegado a AuthContext) |
 | `src/modules/stock/stock.repo.js` | CRUD de insumos, movimientos, producción, F-001 y F-007 |
-| `src/modules/kits/kits.repo.js` | CRUD de kits, F-009 (armables), F-010 (precio) |
+| `src/modules/kits/kits.repo.js` | CRUD de kits, F-009 (armables), F-010 (precio), costo de envases |
 | `src/modules/pedidos/pedidos.repo.js` | Crear / despachar / cancelar pedidos |
 | `src/modules/clientes/clientes.repo.js` | CRUD de clientes y direcciones |
 | `src/modules/compras/compras.repo.js` | Proveedores + órdenes de compra (sin vista) |
@@ -125,6 +125,7 @@
 | `supabase/migrations/010_tipos_y_parametros.sql` | Columna `tipo` en insumos + tabla `parametros_negocio` |
 | `supabase/migrations/011_packaging_y_kits.sql` | 9 insumos de packaging + kits actualizados |
 | `supabase/migrations/012_margen_por_kit.sql` | Columna `margen` en `kits` |
+| `supabase/migrations/013_opciones_pedido.sql` | `devuelve_envases`, `flete`, `descuento_devolucion` en pedidos + `descuento_devolucion_pct` en parámetros |
 
 **Nota:** falta `006_*.sql` (nunca se creó).
 
@@ -190,6 +191,7 @@ PK compuesta: (`kit_id`, `item_cod`).
 | `incertidumbre_pct` | numeric | NO | 0 | Check ≥ 0 |
 | `costo_logistica` | numeric | NO | 0 | Check ≥ 0 |
 | `ventas_objetivo` | int | NO | 1 | Check > 0 |
+| `descuento_devolucion_pct` | numeric | NO | 0.8 | Check 0 ≤ pct ≤ 1 |
 | `actualizado_en` | timestamptz | NO | `now()` | |
 
 ### `clientes`
@@ -235,6 +237,9 @@ PK compuesta: (`kit_id`, `item_cod`).
 | `creado_por` | uuid | SÍ | — |
 | `despachado_en` | timestamptz | SÍ | — |
 | `cancelado_en` | timestamptz | SÍ | — |
+| `devuelve_envases` | boolean | NO | false |
+| `flete` | numeric | NO | 0 | Check ≥ 0 |
+| `descuento_devolucion` | numeric | NO | 0 | Check ≥ 0 |
 
 ### `pedido_items`
 
@@ -386,7 +391,15 @@ PK compuesta: (`kit_id`, `item_cod`).
 - `StockView.jsx` con filtro Packaging.
 - `kits.repo.js` con F-010 nueva (margen real + costo del concentrado).
 - `KitModal.jsx` con campo margen y cálculo correcto.
-- **Bug resuelto:** `precio_concentrado` y `factor_concentrado` ahora se resuelven en consulta separada (Supabase no auto-resuelve FK a la misma tabla).
+- Bug resuelto: `precio_concentrado` y `factor_concentrado` ahora se resuelven en consulta separada (Supabase no auto-resuelve FK a la misma tabla).
+
+### Bloque 10 — Opciones de pedido + verificación de despacho
+
+- Migración `013`: `devuelve_envases`, `flete`, `descuento_devolucion` en `pedidos` + `descuento_devolucion_pct` en `parametros_negocio`.
+- `kits.repo.js` expone `costo_envases` por kit (función `calcularCostoEnvases`).
+- **Verificado empíricamente:** `despachar_pedido` ya descuenta packaging. No hubo que modificarlo.
+- Prueba end-to-end (crear pedido + despachar + verificar stock) exitosa.
+- Base limpiada: pedidos de prueba borrados, stock revertido a estado previo.
 
 ---
 
@@ -430,13 +443,16 @@ PK compuesta: (`kit_id`, `item_cod`).
 | `BOLSA-PLAST` | Bolsa plástica | $80 |
 | `BOLSA-TELA` | Bolsa de tela ecológica | $200 |
 
-### Kits (3)
+### Kits (3 + 1 basura)
 
-| ID | Nombre | Margen | Componentes | Precio |
-|---|---|---|---|---|
-| `kit-a-hogar-basico` | Hogar Básico | 50% | 1 líquido + 4 packaging | $2.600 |
-| `kit-a-cocina-express` | Cocina Express | 50% | 2 líquidos + 4 packaging | $4.500 |
-| `kit-a-bano-diario` | Baño Diario | 50% | 2 líquidos + 4 packaging | $13.500 |
+| ID | Nombre | Margen | Componentes | Precio | Costo envases |
+|---|---|---|---|---|---|
+| `kit-a-hogar-basico` | Hogar Básico | 50% | 1 líquido + 4 packaging | $2.600 | $780 |
+| `kit-a-cocina-express` | Cocina Express | 50% | 2 líquidos + 4 packaging | $4.500 | $1.360 |
+| `kit-a-bano-diario` | Baño Diario | 50% | 2 líquidos + 4 packaging | $13.500 | $2.760 |
+| `kit-borrar` | KIT BORRAR | ? | ? | $14.500 | $580 |
+
+**Pendiente:** borrar `kit-borrar` (fue creado para pruebas).
 
 ### Parámetros de negocio (1)
 
@@ -446,6 +462,7 @@ PK compuesta: (`kit_id`, `item_cod`).
 | `incertidumbre_pct` | 15% |
 | `costo_logistica` | $1.200 |
 | `ventas_objetivo` | 100 |
+| `descuento_devolucion_pct` | 0.8 |
 
 ### Clientes (10)
 
@@ -455,29 +472,64 @@ PK compuesta: (`kit_id`, `item_cod`).
 ---
 
 ## Fórmula de precio del kit
-costo_diluido = precio_concentrado / factor_dilucion
-costo_unitario_componente = costo_diluido × cantidad (para LIQUIDO_DIL)
-costo_unitario_componente = precio_unit × cantidad (para PACKAGING, LIQUIDO_CONC)
-costo_base = suma(costo_unitario_componente)
-precio_venta = costo_base / (1 − margen) [margen real]
-precio_final = redondear_a_centena(precio_venta)
+
+    costo_diluido = precio_concentrado / factor_dilucion
+    costo_unitario_componente = costo_diluido × cantidad    (para LIQUIDO_DIL)
+    costo_unitario_componente = precio_unit × cantidad      (para PACKAGING, LIQUIDO_CONC)
+    costo_base = suma(costo_unitario_componente)
+    precio_venta = costo_base / (1 − margen)    [margen real]
+    precio_final = redondear_a_centena(precio_venta)
 
 **Ejemplo (Hogar Básico, margen 50%):**
-Líquido: 0.5 L × ($5.006 / 5) = $500,60
-Botella: 1 × $500 = $500
-Tapa: 1 × $80 = $80
-Etiqueta: 1 × $100 = $100
-Caja: 1 × $100 = $100
-Costo base = $1.280,60
-Precio = $1.280,60 / 0.5 = $2.561,20
-Redondeado = $2.600
 
+    Líquido: 0.5 L × ($5.006 / 5)      = $500,60
+    Botella: 1 × $500                  = $500
+    Tapa:    1 × $80                   = $80
+    Etiqueta: 1 × $100                 = $100
+    Caja:    1 × $100                  = $100
+    Costo base = $1.280,60
+    Precio = $1.280,60 / 0.5           = $2.561,20
+    Redondeado = $2.600
+
+---
+
+## Fórmula del pedido (a implementar)
+
+    precio_base = suma(precio_kit × cantidad)
+    costo_envases_total = suma(costo_envases_kit × cantidad)
+    descuento_devolucion = devuelve_envases ? costo_envases_total × descuento_devolucion_pct : 0
+    monto = precio_base − descuento_devolucion + flete
+
+**Importante:** el descuento por devolución sólo afecta al `monto`. No afecta stock. Los envases se descuentan siempre al despachar.
+
+---
+
+## Próxima tarea (al retomar)
+
+**Paso C' — Modificar `crear_pedido` (RPC) para aceptar `devuelve_envases`, `flete`, `descuento_devolucion`.**
+
+**Decisión pendiente:** Opción A (cálculo en frontend) vs Opción B (cálculo en RPC).
+
+- **A. Frontend calcula, RPC guarda.** Más simple. Reutiliza lógica de `kits.repo.js`.
+- **B. RPC calcula todo.** Más robusto. Requiere SQL más complejo.
+
+**Recomendación:** A.
+
+**Y antes de arrancar:**
+
+- Borrar `kit-borrar` (con `select public.reemplazar_kit_items('kit-borrar', '[]'::jsonb);` no funciona porque rechaza vacío. Hacer `delete from kit_items where kit_id = 'kit-borrar'; delete from kits where id = 'kit-borrar';`).
+- Confirmar Opción A o B.
+
+**Después:**
+
+- **Paso D:** Reescribir `CrearPedidoModal.jsx` con kits + checks (devolución, flete).
+- **Paso E:** `PedidosView.jsx` muestra las opciones aplicadas.
 
 ---
 
 ## Ideas a futuro
 
-### Iconos de clasificación visual rápida (NUEVO)
+### Iconos de clasificación visual rápida
 
 **Objetivo:** facilitar la búsqueda y clasificación visual dentro de las listas de Stock.
 
@@ -507,10 +559,11 @@ Redondeado = $2.600
 
 **Nota:** los iconos se agregan a nivel frontend (no a la base). Se resuelven por `tipo` del insumo o `categoria` del kit.
 
-### Filtro "Kits" en Stock (NUEVO)
+### Filtro "Kits" en Stock
 
 Cuando se implemente `KIT_ARMADO` como tipo real de insumo, agregar el filtro correspondiente en `StockView.jsx`:
-[Todos] [Concentrados] [Diluidos] [Packaging] [Kits Armados]
+
+    [Todos] [Concentrados] [Diluidos] [Packaging] [Kits Armados]
 
 **Estado:** pendiente de implementar el modelo `KIT_ARMADO` real.
 
@@ -524,8 +577,6 @@ Cuando se implemente `KIT_ARMADO` como tipo real de insumo, agregar el filtro co
 - Alta del kit armado.
 
 ### Modelo de 4 tipos de insumo
-
-Agregar `tipo` a `stock_insumos` con 4 valores:
 
 | tipo | Qué agrupa | Ejemplos |
 |---|---|---|
@@ -542,11 +593,10 @@ Al crear un pedido, se podrán tildar:
 
 | Opción | Efecto |
 |---|---|
-| **Líquidos** | Cobra el contenido líquido |
-| **Envases** | Cobra envase + tapa + etiqueta |
-| **Flete** | Suma el costo de logística |
+| **Devuelve envases** | Aplica descuento (80% del costo de envases) al monto |
+| **Flete** | Suma el costo de logística al monto |
 
-**Estado:** pendiente de implementar en `CrearPedidoModal.jsx`.
+**Estado:** columnas creadas en BD. Pendiente la implementación en `CrearPedidoModal.jsx`.
 
 ### Calculadora de dilución inversa
 
@@ -560,18 +610,19 @@ Ya implementada parcialmente en `CalculadoraView.jsx`.
 
 | # | Tarea | Prioridad | Complejidad |
 |---|---|---|---|
-| 1 | **Actualizar `despachar_pedido` (RPC) para descontar packaging** | Alta | Media |
-| 2 | **Actualizar `CrearPedidoModal.jsx` con kits + opciones (flete, bolsas)** | Alta | Media |
-| 3 | **Vista Parámetros** para editar costo fijo, logística, ventas objetivo | Media | Baja |
-| 4 | **Detalle de pedido** (ver items antes de despachar) | Alta | Baja |
-| 5 | **Reportes** (ranking ventas + valorización) | Media | Baja |
-| 6 | **Compras** (proveedores + órdenes) | Media | Alta |
-| 7 | **Auth por rol** (repartidor ve sólo agenda) | Media | Media |
-| 8 | **Agenda** (calendario de entregas) | Baja | Alta |
-| 9 | **Módulo Contable** | Baja | Alta |
-| 10 | **Módulo Armado de kits** (KIT_ARMADO) | Baja | Alta |
-| 11 | **Iconos de clasificación visual** | Baja | Baja |
-| 12 | **Filtro "Kits Armados" en Stock** (depende de #10) | Baja | Baja |
+| 1 | **Borrar `kit-borrar`** (limpieza) | Alta | Trivial |
+| 2 | **Modificar `crear_pedido` (RPC)** con `devuelve_envases`, `flete`, `descuento_devolucion` | Alta | Media |
+| 3 | **Reescribir `CrearPedidoModal.jsx`** con kits + checks | Alta | Media |
+| 4 | **`PedidosView.jsx`** muestra las opciones aplicadas | Media | Baja |
+| 5 | **Vista Parámetros** (editar desde la app) | Media | Baja |
+| 6 | **Detalle de pedido** | Alta | Baja |
+| 7 | **Reportes** (ranking ventas + valorización) | Media | Baja |
+| 8 | **Compras** (proveedores + órdenes) | Media | Alta |
+| 9 | **Auth por rol** (repartidor ve sólo agenda) | Media | Media |
+| 10 | **Agenda** (calendario de entregas) | Baja | Alta |
+| 11 | **Módulo Contable** | Baja | Alta |
+| 12 | **Módulo Armado de kits** (KIT_ARMADO) | Baja | Alta |
+| 13 | **Iconos de clasificación visual** | Baja | Baja |
 
 ---
 
@@ -583,15 +634,16 @@ Ya implementada parcialmente en `CalculadoraView.jsx`.
 | 2 | El detalle del pedido no es visible | Alta |
 | 3 | Los precios de venta de diluidos están en 0 | Alta |
 | 4 | Los precios de packaging son ficticios (falta cargar reales) | Alta |
-| 5 | `despachar_pedido` no descuenta packaging todavía | Alta |
-| 6 | El armado de kits por adelantado no se refleja en stock | Media |
-| 7 | `registrarProduccion` no es 100% atómico (2 llamadas seguidas) | Media |
-| 8 | Todos los usuarios ven todo (no hay restricción por rol) | Media |
-| 9 | Los kits no guardan versión histórica | Media |
-| 10 | Sin tests de integración real | Media |
-| 11 | Categorías de kits sin normalizar | Baja |
-| 12 | URLs con `#` (HashRouter) | Cosmético |
-| 13 | Deploy manual | Baja |
+| 5 | `crear_pedido` no acepta `devuelve_envases`, `flete`, `descuento_devolucion` todavía | Alta |
+| 6 | Existe `kit-borrar` en la base (basura de pruebas) | Baja |
+| 7 | El armado de kits por adelantado no se refleja en stock | Media |
+| 8 | `registrarProduccion` no es 100% atómico (2 llamadas seguidas) | Media |
+| 9 | Todos los usuarios ven todo (no hay restricción por rol) | Media |
+| 10 | Los kits no guardan versión histórica | Media |
+| 11 | Sin tests de integración real | Media |
+| 12 | Categorías de kits sin normalizar | Baja |
+| 13 | URLs con `#` (HashRouter) | Cosmético |
+| 14 | Deploy manual | Baja |
 
 ---
 
@@ -643,22 +695,37 @@ Ya implementada parcialmente en `CalculadoraView.jsx`.
 | F-012 | `agua_a_agregar = produccion_diluido − cantidad_concentrado` | `ProduccionModal.jsx` | Activa |
 | F-013 | `concentrado_necesario = litros_finales / factor_dilucion` | `CalculadoraView.jsx` | Activa |
 | F-014 | `costo_diluido = precio_concentrado / factor_dilucion` | `kits.repo.js` | Activa |
+| F-015 | `costo_envases_kit = suma(precio_unit × cantidad)` de componentes `PACKAGING` | `kits.repo.js` | Activa |
+| F-016 | `monto_pedido = precio_base − descuento_devolucion + flete` | `CrearPedidoModal.jsx` (a implementar) | Pendiente |
 
 ---
 
 ## Flujo de trabajo para cambios
 
-```powershell
-git add .
-git commit -m "descripción"
-git push
-npm run deploy
+    git add .
+    git commit -m "descripción"
+    git push
+    npm run deploy
 
 En 30 segundos la URL pública refleja los cambios.
 
-Registro de sesiones
-Fecha	Qué se hizo
-2026-09-23 (tarde)	Migración 010 (tipo + parámetros). Migración 011 (packaging). Migración 012 (margen). Precio del kit con margen real. Bug del precio_concentrado resuelto
-2026-09-23	Actualización completa del .md con árboles de archivos y BD. Definición del modelo de 4 tipos
-2026-09-22	Módulo Calculadora + Módulo Producción. Filtros por tipo en Stock
-2026-09-18	Deploy a GitHub Pages. HashRouter. .gitignore
+---
+
+## Registro de sesiones
+
+| Fecha | Qué se hizo |
+|---|---|
+| 2026-09-23 (noche) | Migración 013 (opciones de pedido). `kits.repo.js` con `costo_envases`. Verificación empírica de `despachar_pedido`. Prueba end-to-end exitosa. Base limpiada |
+| 2026-09-23 (tarde) | Migración 010 (tipo + parámetros). Migración 011 (packaging). Migración 012 (margen). Precio del kit con margen real. Bug del `precio_concentrado` resuelto |
+| 2026-09-23 | Actualización completa del `.md` con árboles de archivos y BD. Definición del modelo de 4 tipos |
+| 2026-09-22 | Módulo Calculadora + Módulo Producción. Filtros por tipo en Stock |
+| 2026-09-18 | Deploy a GitHub Pages. HashRouter. `.gitignore` |
+
+---
+
+## Cómo usar este documento
+
+- **Antes de cada jornada:** pegar este documento en el chat para que la IA sepa el estado actual.
+- **Al finalizar cada jornada:** pegar este documento para que la IA lo actualice.
+- **Cada decisión nueva:** agregar en la sección correspondiente.
+- **Cada problema detectado:** agregar a "Advertencias".

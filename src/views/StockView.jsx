@@ -7,7 +7,7 @@ import MovimientoModal from '../components/MovimientoModal.jsx';
 import ProduccionModal from '../components/ProduccionModal.jsx';
 import {
   Plus, Edit2, Trash2, AlertCircle, Search,
-  ArrowDownUp, Package, Beaker, FlaskConical, Droplets, Package2
+  ArrowDownUp, Package, Beaker, FlaskConical, Droplets, Package2, Lock
 } from 'lucide-react';
 
 const BADGE = {
@@ -30,6 +30,11 @@ function formatearPrecio(n) {
     currency: 'ARS',
     maximumFractionDigits: 2
   }).format(n ?? 0);
+}
+
+function formatearNumero(n) {
+  if (n == null) return '—';
+  return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(n);
 }
 
 export default function StockView() {
@@ -101,7 +106,6 @@ export default function StockView() {
     }
   };
 
-  // Contadores por tipo (usa la columna tipo)
   const contadoresTipo = useMemo(() => {
     const c = { LIQUIDO_CONC: 0, LIQUIDO_DIL: 0, PACKAGING: 0, KIT_ARMADO: 0, OTRO: 0 };
     for (const i of insumos) {
@@ -111,7 +115,6 @@ export default function StockView() {
     return c;
   }, [insumos]);
 
-  // Contadores por estado (sobre los filtrados por tipo)
   const contadoresEstado = useMemo(() => {
     const base = insumos.filter(i => {
       if (filtroTipo === 'TODOS') return true;
@@ -268,6 +271,7 @@ export default function StockView() {
             const cobertura = i.cobertura_dias;
             const critico = i.estado_stock === 'CRITICO' || i.estado_stock === 'BAJO';
             const esConcentrado = i.tipo === 'LIQUIDO_CONC';
+            const tieneReserva = Number(i.stock_reservado ?? 0) > 0;
 
             return (
               <div
@@ -285,26 +289,41 @@ export default function StockView() {
                       }`}>
                         {i.estado_stock}
                       </span>
+                      {tieneReserva && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap bg-purple-500/15 text-purple-300 border border-purple-500/40 flex items-center gap-1">
+                          <Lock size={9} /> {formatearNumero(i.stock_reservado)} reservado
+                        </span>
+                      )}
                     </div>
                     <div className="text-[10px] text-slate-500 font-mono mt-0.5">
                       {i.cod}
                     </div>
 
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 text-xs">
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-3 text-xs">
                       <div>
-                        <div className="text-[10px] text-slate-500 uppercase tracking-wider">Stock</div>
+                        <div className="text-[10px] text-slate-500 uppercase tracking-wider">Físico</div>
                         <div className={`tabular-nums font-bold ${critico ? 'text-red-400' : 'text-slate-200'}`}>
-                          {i.stock} <span className="text-slate-500 font-normal">{i.unidad}</span>
+                          {formatearNumero(i.stock)} <span className="text-slate-500 font-normal">{i.unidad}</span>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-slate-500 uppercase tracking-wider">Disponible</div>
+                        <div className={`tabular-nums font-bold ${
+                          i.stock_disponible <= 0 ? 'text-red-400' :
+                          i.stock_disponible < i.minimo ? 'text-amber-400' :
+                          'text-emerald-400'
+                        }`}>
+                          {formatearNumero(i.stock_disponible)} <span className="text-slate-500 font-normal">{i.unidad}</span>
                         </div>
                       </div>
                       <div>
                         <div className="text-[10px] text-slate-500 uppercase tracking-wider">Mínimo</div>
-                        <div className="tabular-nums text-slate-300">{i.minimo}</div>
+                        <div className="tabular-nums text-slate-300">{formatearNumero(i.minimo)}</div>
                       </div>
                       <div>
                         <div className="text-[10px] text-slate-500 uppercase tracking-wider">Cobertura</div>
                         <div className="tabular-nums text-slate-300">
-                          {cobertura == null ? '∞' : `${cobertura} d`}
+                          {cobertura == null ? '∞' : `${formatearNumero(cobertura)} d`}
                         </div>
                       </div>
                       <div>

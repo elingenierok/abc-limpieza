@@ -1,10 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
-import { crearPedido, obtenerParametrosNegocio } from '../modules/pedidos/pedidos.repo.js';
-import { listarClientes } from '../modules/clientes/clientes.repo.js';
+import { actualizarPedido, obtenerParametrosNegocio } from '../modules/pedidos/pedidos.repo.js';
 import { listarKits } from '../modules/kits/kits.repo.js';
 import { listarInsumos } from '../modules/stock/stock.repo.js';
-import { useAuth } from '../context/AuthContext.jsx';
-import { X, Plus, Trash2, AlertCircle, ShoppingCart, Package, AlertTriangle } from 'lucide-react';
+import { X, Plus, Trash2, AlertCircle, ShoppingCart, AlertTriangle, Edit2 } from 'lucide-react';
 
 function formatearPrecio(n) {
   return new Intl.NumberFormat('es-AR', {
@@ -19,17 +17,14 @@ function formatearNumero(n) {
   return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(n);
 }
 
-export default function CrearPedidoModal({ isOpen, onClose, onPedidoCreado }) {
-  const { usuario } = useAuth();
-
-  const [clientes, setClientes] = useState([]);
+export default function EditarPedidoModal({ isOpen, pedido, onClose, onPedidoActualizado }) {
   const [kits, setKits] = useState([]);
   const [packagings, setPackagings] = useState([]);
   const [insumosMap, setInsumosMap] = useState({});
   const [parametros, setParametros] = useState(null);
 
-  const [clienteId, setClienteId] = useState('');
   const [prioridad, setPrioridad] = useState('MEDIA');
+  const [fechaCompromiso, setFechaCompromiso] = useState('');
   const [obs, setObs] = useState('');
   const [lineas, setLineas] = useState([]);
   const [conFlete, setConFlete] = useState(false);
@@ -39,28 +34,15 @@ export default function CrearPedidoModal({ isOpen, onClose, onPedidoCreado }) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (isOpen) {
-      cargarCatalogos();
-    } else {
-      resetear();
-    }
-  }, [isOpen]);
+    if (!isOpen) return;
+    cargarTodo();
+  }, [isOpen, pedido]);
 
-  const resetear = () => {
-    setClienteId('');
-    setPrioridad('MEDIA');
-    setObs('');
-    setLineas([]);
-    setConFlete(false);
-    setError(null);
-  };
-
-  const cargarCatalogos = async () => {
+  const cargarTodo = async () => {
     setCargandoDatos(true);
     setError(null);
     try {
-      const [listClientes, listKits, listInsumos, params] = await Promise.all([
-        listarClientes({ soloActivos: true }),
+      const [listKits, listInsumos, params] = await Promise.all([
         listarKits({ soloActivos: true }),
         listarInsumos(),
         obtenerParametrosNegocio()
@@ -69,15 +51,27 @@ export default function CrearPedidoModal({ isOpen, onClose, onPedidoCreado }) {
       const packagings = listInsumos.filter(i => i.tipo === 'PACKAGING');
       const mapa = Object.fromEntries(listInsumos.map(i => [i.cod, i]));
 
-      setClientes(listClientes);
       setKits(listKits);
       setPackagings(packagings);
       setInsumosMap(mapa);
       setParametros(params);
 
-      if (listClientes.length > 0) setClienteId(listClientes[0].id);
+      // Precargar el pedido
+      setPrioridad(pedido?.prioridad ?? 'MEDIA');
+      setFechaCompromiso(pedido?.fecha_compromiso ?? '');
+      setObs(pedido?.obs ?? '');
+      setConFlete(Number(pedido?.flete ?? 0) > 0);
+
+      const lineasIniciales = (pedido?.items ?? []).map(it => ({
+        tipo: it.tipo === 'KIT' ? 'KIT' : 'PACKAGING',
+        item_cod: it.item_cod,
+        cantidad: Number(it.cantidad),
+        precio_unit: Number(it.precio_unit),
+        devuelve_envases: Boolean(it.devuelve_envases)
+      }));
+      setLineas(lineasIniciales);
     } catch (err) {
-      setError('Error al cargar los catálogos.');
+      setError('Error al cargar los datos.');
     } finally {
       setCargandoDatos(false);
     }
@@ -139,7 +133,7 @@ export default function CrearPedidoModal({ isOpen, onClose, onPedidoCreado }) {
   };
 
   /* =========================================================
-     Requerimientos consolidados (explota kits)
+     Requerimientos consolidados
      ========================================================= */
   const requerimientos = useMemo(() => {
     const req = {};
@@ -166,33 +160,55 @@ export default function CrearPedidoModal({ isOpen, onClose, onPedidoCreado }) {
 
   /* =========================================================
      Faltantes de stock
+     Consideran la reserva actual del pedido (que será liberada y re-reservada)
      ========================================================= */
   const faltantes = useMemo(() => {
     const out = [];
+
+    // Requerimientos del pedido ORIGINAL (para sumarlos al disponible)
+    const reqOriginales = {};
+    for (const it of pedido?.items ?? []) {
+      if (it.tipo === 'KIT') {
+        const kit = kits.find(k => k.id === it.item_cod);
+        if (!kit) continue;
+        for (const comp of kit.componentes ?? []) {
+          const cod = comp.cod;
+          const cantidadTotal = Number(comp.cantidad) * Number(it.cantidad);
+          reqOriginales[cod] = (reqOriginales[cod] ?? 0) + cantidadTotal;
+        }
+      } else {
+        reqOriginales[it.item_cod] = (reqOriginales[it.item_cod] ?? 0) + Number(it.cantidad);
+      }
+    }
+
     for (const [cod, cantidadRequerida] of Object.entries(requerimientos)) {
       const insumo = insumosMap[cod];
       if (!insumo) {
         out.push({ cod, nom: cod, requerido: cantidadRequerida, disponible: 0, unidad: '' });
         continue;
       }
-      const disponible = Number(insumo.stock_disponible ?? insumo.stock ?? 0);
-      if (disponible < cantidadRequerida) {
+      // El disponible a considerar incluye lo que este pedido ya tiene reservado
+      const disponibleActual = Number(insumo.stock_disponible ?? insumo.stock ?? 0);
+      const reservaPropia = Number(reqOriginales[cod] ?? 0);
+      const disponibleReal = disponibleActual + reservaPropia;
+
+      if (disponibleReal < cantidadRequerida) {
         out.push({
           cod,
           nom: insumo.nom,
           unidad: insumo.unidad,
           requerido: cantidadRequerida,
-          disponible
+          disponible: disponibleReal
         });
       }
     }
     return out;
-  }, [requerimientos, insumosMap]);
+  }, [requerimientos, insumosMap, pedido, kits]);
 
   const hayFaltantes = faltantes.length > 0;
 
   /* =========================================================
-     Cálculos del resumen
+     Resumen comercial
      ========================================================= */
   const resumen = useMemo(() => {
     let subtotal = 0;
@@ -236,10 +252,6 @@ export default function CrearPedidoModal({ isOpen, onClose, onPedidoCreado }) {
     e.preventDefault();
     setError(null);
 
-    if (!clienteId) {
-      setError('Elegí un cliente.');
-      return;
-    }
     if (lineas.length === 0) {
       setError('Agregá al menos un ítem al pedido.');
       return;
@@ -257,8 +269,8 @@ export default function CrearPedidoModal({ isOpen, onClose, onPedidoCreado }) {
 
     setEnviando(true);
     try {
-      await crearPedido({
-        cliente_id: clienteId,
+      await actualizarPedido({
+        pedido_id: pedido.id,
         items: lineas.map(l => ({
           tipo: l.tipo === 'KIT' ? 'KIT' : 'INSUMO',
           item_cod: l.item_cod,
@@ -267,29 +279,29 @@ export default function CrearPedidoModal({ isOpen, onClose, onPedidoCreado }) {
           devuelve_envases: l.tipo === 'KIT' ? Boolean(l.devuelve_envases) : false
         })),
         prioridad,
+        fecha_compromiso: fechaCompromiso || null,
         obs: obs.trim() || null,
-        usuario_id: usuario?.id,
         devuelve_envases: resumen.devuelveEnvases,
         flete: resumen.flete,
         descuento_devolucion: resumen.descuentoTotal
       });
-      onPedidoCreado();
+      onPedidoActualizado();
       onClose();
     } catch (err) {
-      setError(err.detalle || err.message || 'Error al guardar el pedido');
+      setError(err.detalle || err.message || 'Error al actualizar el pedido');
     } finally {
       setEnviando(false);
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || !pedido) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
       <div className="bg-slate-900 border border-slate-800 rounded-lg w-full max-w-4xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <h2 className="text-sm font-bold uppercase text-white tracking-wider flex items-center gap-2">
-            <ShoppingCart size={16} /> Nuevo Pedido
+            <Edit2 size={16} /> Editar Pedido
           </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white">
             <X size={18} />
@@ -307,21 +319,18 @@ export default function CrearPedidoModal({ isOpen, onClose, onPedidoCreado }) {
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
 
+            {/* Cliente (readonly) */}
+            <div>
+              <label className="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">
+                Cliente (no editable)
+              </label>
+              <div className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-slate-500">
+                {pedido.cliente?.razon_social ?? '—'}
+              </div>
+            </div>
+
             {/* Datos del pedido */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Cliente</label>
-                <select
-                  value={clienteId}
-                  onChange={e => setClienteId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-500"
-                >
-                  {clientes.map(c => (
-                    <option key={c.id} value={c.id}>{c.razon_social}</option>
-                  ))}
-                </select>
-              </div>
-
               <div>
                 <label className="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Prioridad</label>
                 <select
@@ -333,6 +342,16 @@ export default function CrearPedidoModal({ isOpen, onClose, onPedidoCreado }) {
                   <option value="MEDIA">Media</option>
                   <option value="ALTA">Alta</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Fecha compromiso</label>
+                <input
+                  type="date"
+                  value={fechaCompromiso ?? ''}
+                  onChange={e => setFechaCompromiso(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-500"
+                />
               </div>
 
               <div>
@@ -463,7 +482,7 @@ export default function CrearPedidoModal({ isOpen, onClose, onPedidoCreado }) {
               </div>
             )}
 
-            {/* Faltantes de stock */}
+            {/* Faltantes */}
             {hayFaltantes && (
               <div className="bg-amber-950/40 border border-amber-800 rounded p-4 space-y-2">
                 <div className="flex items-center gap-2 text-amber-300 text-xs font-bold uppercase tracking-wider">
@@ -550,7 +569,7 @@ export default function CrearPedidoModal({ isOpen, onClose, onPedidoCreado }) {
                 disabled={enviando || lineas.length === 0 || hayFaltantes}
                 className="bg-sky-600 hover:bg-sky-500 text-white font-medium px-4 py-2 rounded text-xs transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {enviando ? 'Guardando…' : 'Guardar Pedido'}
+                {enviando ? 'Guardando…' : 'Guardar Cambios'}
               </button>
             </div>
           </form>

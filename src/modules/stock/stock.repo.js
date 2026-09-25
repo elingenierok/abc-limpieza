@@ -18,12 +18,13 @@ export function calcularEstado(stock, minimo) {
   return 'OK';
 }
 
-/* Aplica derivados a una fila cruda */
 function conDerivados(row) {
   if (!row) return null;
   const cobertura_dias = calcularCobertura(row.stock, row.consumo_diario);
   const estado_stock   = calcularEstado(row.stock, row.minimo);
-  return { ...row, cobertura_dias, estado_stock };
+  const stock_reservado = Number(row.stock_reservado ?? 0);
+  const stock_disponible = Number(row.stock ?? 0) - stock_reservado;
+  return { ...row, stock_reservado, stock_disponible, cobertura_dias, estado_stock };
 }
 
 /* Normaliza errores de Supabase a códigos tipados */
