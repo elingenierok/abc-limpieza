@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { listarKits, eliminarKit } from '../modules/kits/kits.repo.js';
 import KitModal from '../components/KitModal.jsx';
 import { Plus, Edit2, Trash2, AlertCircle, Search, Package, Boxes } from 'lucide-react';
@@ -11,7 +11,6 @@ function formatearPrecio(n) {
   }).format(n ?? 0);
 }
 
-/* Emoji según categoría del kit */
 function emojiParaCategoria(categoria) {
   const cat = (categoria ?? '').toLowerCase().trim();
   const mapa = {
@@ -42,6 +41,7 @@ export default function KitsView() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
   const [busqueda, setBusqueda] = useState('');
+  const [filtroCategoria, setFiltroCategoria] = useState('TODAS');
   const [modalAbierto, setModalAbierto] = useState(false);
   const [kitEditar, setKitEditar] = useState(null);
 
@@ -82,15 +82,46 @@ export default function KitsView() {
     }
   };
 
-  const filtrados = kits.filter(k => {
-    if (!busqueda.trim()) return true;
-    const s = busqueda.toLowerCase();
-    return (
-      k.nombre?.toLowerCase().includes(s) ||
-      k.categoria?.toLowerCase().includes(s) ||
-      k.id?.toLowerCase().includes(s)
-    );
-  });
+  /* =========================================================
+     Categorías dinámicas (según kits existentes)
+     ========================================================= */
+  const categorias = useMemo(() => {
+    const set = new Set();
+    for (const k of kits) {
+      if (k.categoria) set.add(k.categoria);
+    }
+    return Array.from(set).sort();
+  }, [kits]);
+
+  const contadoresCat = useMemo(() => {
+    const c = { TOTAL: kits.length };
+    for (const cat of categorias) {
+      c[cat] = kits.filter(k => k.categoria === cat).length;
+    }
+    return c;
+  }, [kits, categorias]);
+
+  /* =========================================================
+     Filtrado final
+     ========================================================= */
+  const filtrados = useMemo(() => {
+    let resultado = kits;
+
+    if (filtroCategoria !== 'TODAS') {
+      resultado = resultado.filter(k => k.categoria === filtroCategoria);
+    }
+
+    if (busqueda.trim()) {
+      const s = busqueda.toLowerCase();
+      resultado = resultado.filter(k =>
+        k.nombre?.toLowerCase().includes(s) ||
+        k.categoria?.toLowerCase().includes(s) ||
+        k.id?.toLowerCase().includes(s)
+      );
+    }
+
+    return resultado;
+  }, [kits, filtroCategoria, busqueda]);
 
   return (
     <div className="space-y-6">
@@ -106,6 +137,39 @@ export default function KitsView() {
           <Plus size={16} /> Nuevo Kit
         </button>
       </div>
+
+      {/* Filtros por categoría */}
+      {kits.length > 0 && (
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => setFiltroCategoria('TODAS')}
+            className={`text-xs px-3 py-1.5 rounded-full border transition flex items-center gap-1 ${
+              filtroCategoria === 'TODAS'
+                ? 'bg-slate-800 text-white border-sky-500'
+                : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800'
+            }`}
+          >
+            <Package size={12} /> Todas ({contadoresCat.TOTAL})
+          </button>
+          {categorias.map(cat => {
+            const n = contadoresCat[cat] ?? 0;
+            const activo = filtroCategoria === cat;
+            return (
+              <button
+                key={cat}
+                onClick={() => setFiltroCategoria(cat)}
+                className={`text-xs px-3 py-1.5 rounded-full border transition flex items-center gap-1 ${
+                  activo
+                    ? 'bg-sky-900/40 text-sky-300 border-sky-600'
+                    : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800'
+                }`}
+              >
+                <span>{emojiParaCategoria(cat)}</span> {cat} ({n})
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="relative">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -128,8 +192,8 @@ export default function KitsView() {
         <div className="text-slate-500 text-xs py-8 text-center">Cargando kits…</div>
       ) : filtrados.length === 0 ? (
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-8 text-center text-slate-500 text-sm">
-          {busqueda
-            ? 'Sin resultados para tu búsqueda.'
+          {busqueda || filtroCategoria !== 'TODAS'
+            ? 'Sin resultados para los filtros seleccionados.'
             : 'No hay kits registrados. Creá el primero con el botón "Nuevo Kit".'}
         </div>
       ) : (
@@ -178,7 +242,6 @@ export default function KitsView() {
                       </span>
                     </div>
 
-                    {/* Composición del kit */}
                     {k.componentes.length > 0 && (
                       <div className="mt-2 pt-2 border-t border-slate-800/50">
                         <ul className="text-[11px] text-slate-500 space-y-0.5">

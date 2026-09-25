@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { actualizarPedido, obtenerParametrosNegocio } from '../modules/pedidos/pedidos.repo.js';
 import { listarKits } from '../modules/kits/kits.repo.js';
 import { listarInsumos } from '../modules/stock/stock.repo.js';
-import { X, Plus, Trash2, AlertCircle, ShoppingCart, AlertTriangle, Edit2 } from 'lucide-react';
+import { X, Plus, Trash2, AlertCircle, AlertTriangle, Edit2 } from 'lucide-react';
 
 function formatearPrecio(n) {
   return new Intl.NumberFormat('es-AR', {
@@ -56,7 +56,6 @@ export default function EditarPedidoModal({ isOpen, pedido, onClose, onPedidoAct
       setInsumosMap(mapa);
       setParametros(params);
 
-      // Precargar el pedido
       setPrioridad(pedido?.prioridad ?? 'MEDIA');
       setFechaCompromiso(pedido?.fecha_compromiso ?? '');
       setObs(pedido?.obs ?? '');
@@ -132,9 +131,6 @@ export default function EditarPedidoModal({ isOpen, pedido, onClose, onPedidoAct
     });
   };
 
-  /* =========================================================
-     Requerimientos consolidados
-     ========================================================= */
   const requerimientos = useMemo(() => {
     const req = {};
 
@@ -158,14 +154,9 @@ export default function EditarPedidoModal({ isOpen, pedido, onClose, onPedidoAct
     return req;
   }, [lineas, kits]);
 
-  /* =========================================================
-     Faltantes de stock
-     Consideran la reserva actual del pedido (que será liberada y re-reservada)
-     ========================================================= */
   const faltantes = useMemo(() => {
     const out = [];
 
-    // Requerimientos del pedido ORIGINAL (para sumarlos al disponible)
     const reqOriginales = {};
     for (const it of pedido?.items ?? []) {
       if (it.tipo === 'KIT') {
@@ -187,7 +178,6 @@ export default function EditarPedidoModal({ isOpen, pedido, onClose, onPedidoAct
         out.push({ cod, nom: cod, requerido: cantidadRequerida, disponible: 0, unidad: '' });
         continue;
       }
-      // El disponible a considerar incluye lo que este pedido ya tiene reservado
       const disponibleActual = Number(insumo.stock_disponible ?? insumo.stock ?? 0);
       const reservaPropia = Number(reqOriginales[cod] ?? 0);
       const disponibleReal = disponibleActual + reservaPropia;
@@ -207,9 +197,6 @@ export default function EditarPedidoModal({ isOpen, pedido, onClose, onPedidoAct
 
   const hayFaltantes = faltantes.length > 0;
 
-  /* =========================================================
-     Resumen comercial
-     ========================================================= */
   const resumen = useMemo(() => {
     let subtotal = 0;
     let descuentoTotal = 0;
@@ -245,9 +232,6 @@ export default function EditarPedidoModal({ isOpen, pedido, onClose, onPedidoAct
     };
   }, [lineas, kits, parametros, conFlete]);
 
-  /* =========================================================
-     Guardar
-     ========================================================= */
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
@@ -297,8 +281,8 @@ export default function EditarPedidoModal({ isOpen, pedido, onClose, onPedidoAct
   if (!isOpen || !pedido) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-lg w-full max-w-4xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center sm:p-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-t-lg sm:rounded-lg w-full max-w-4xl p-4 sm:p-6 space-y-4 max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <h2 className="text-sm font-bold uppercase text-white tracking-wider flex items-center gap-2">
             <Edit2 size={16} /> Editar Pedido
@@ -367,130 +351,241 @@ export default function EditarPedidoModal({ isOpen, pedido, onClose, onPedidoAct
             </div>
 
             {/* Botones para agregar */}
-            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-800">
               <span className="text-[10px] text-slate-400 uppercase tracking-wider">Ítems del pedido</span>
-              <div className="flex gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-2">
                 <button
                   type="button"
                   onClick={() => agregarLinea('KIT')}
                   disabled={kits.length === 0}
-                  className="text-xs bg-slate-800 hover:bg-slate-700 text-sky-400 px-2 py-1 rounded flex items-center gap-1 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="text-xs bg-slate-800 hover:bg-slate-700 text-sky-400 px-3 py-2 sm:py-1 rounded flex items-center justify-center gap-1 transition disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <Plus size={14} /> Agregar Kit
+                  <Plus size={14} /> Kit
                 </button>
                 <button
                   type="button"
                   onClick={() => agregarLinea('PACKAGING')}
                   disabled={packagings.length === 0}
-                  className="text-xs bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded flex items-center gap-1 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="text-xs bg-slate-800 hover:bg-slate-700 text-amber-400 px-3 py-2 sm:py-1 rounded flex items-center justify-center gap-1 transition disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <Plus size={14} /> Agregar Packaging
+                  <Plus size={14} /> Packaging
                 </button>
               </div>
             </div>
 
-            {/* Tabla de líneas */}
+            {/* Líneas */}
             {lineas.length === 0 ? (
               <div className="text-xs text-slate-600 italic text-center py-6 border border-dashed border-slate-800 rounded">
                 Sin ítems. Agregá un kit o packaging.
               </div>
             ) : (
-              <div className="bg-slate-950 border border-slate-800 rounded overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-slate-500 uppercase tracking-wider text-[10px] border-b border-slate-800">
-                      <th className="text-left p-2">#</th>
-                      <th className="text-left p-2">Ítem</th>
-                      <th className="text-center p-2 w-20">Cant.</th>
-                      <th className="text-right p-2 w-24">Precio u.</th>
-                      <th className="text-right p-2 w-24">Subtotal</th>
-                      <th className="text-center p-2 w-24">Dev. env.</th>
-                      <th className="p-2 w-10"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {resumen.lineasCalculadas.map((l, idx) => (
-                      <tr key={idx} className="border-b border-slate-800/50">
-                        <td className="p-2 text-slate-500">{idx + 1}</td>
-                        <td className="p-2">
-                          {l.tipo === 'KIT' ? (
-                            <select
-                              value={l.item_cod}
-                              onChange={e => cambiarItemDeLinea(idx, e.target.value)}
-                              className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200"
-                            >
-                              {kits.map(k => (
-                                <option key={k.id} value={k.id}>{k.nombre}</option>
-                              ))}
-                            </select>
-                          ) : (
-                            <select
-                              value={l.item_cod}
-                              onChange={e => cambiarItemDeLinea(idx, e.target.value)}
-                              className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200"
-                            >
-                              {packagings.map(p => (
-                                <option key={p.cod} value={p.cod}>{p.nom}</option>
-                              ))}
-                            </select>
-                          )}
-                        </td>
-                        <td className="p-2 text-center">
-                          <input
-                            type="number"
-                            min="1"
-                            step="1"
-                            value={l.cantidad}
-                            onChange={e => {
-                              const val = Math.floor(Number(e.target.value) || 0);
-                              actualizarLinea(idx, 'cantidad', val < 1 ? 1 : val);
-                            }}
-                            className="w-16 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200 text-center"
-                          />
-                        </td>
-                        <td className="p-2 text-right text-slate-400 tabular-nums">
-                          {formatearPrecio(l.precio_unit)}
-                        </td>
-                        <td className="p-2 text-right text-slate-200 font-bold tabular-nums">
-                          {formatearPrecio(l.subtotal)}
-                        </td>
-                        <td className="p-2 text-center">
-                          {l.tipo === 'KIT' ? (
-                            <input
-                              type="checkbox"
-                              checked={l.devuelve_envases}
-                              onChange={e => actualizarLinea(idx, 'devuelve_envases', e.target.checked)}
-                              className="w-4 h-4 accent-sky-500 cursor-pointer"
-                            />
-                          ) : (
-                            <span className="text-slate-600">—</span>
-                          )}
-                        </td>
-                        <td className="p-2 text-center">
+              <>
+                {/* Mobile: tarjetas */}
+                <div className="md:hidden space-y-3">
+                  {resumen.lineasCalculadas.map((l, idx) => (
+                    <div key={idx} className="bg-slate-950 border border-slate-800 rounded p-3 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-slate-500 uppercase tracking-wider">
+                          #{idx + 1} · {l.tipo}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => eliminarLinea(idx)}
+                          className="text-red-400 hover:text-red-300 p-1"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+
+                      <select
+                        value={l.item_cod}
+                        onChange={e => cambiarItemDeLinea(idx, e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-sm text-slate-200"
+                      >
+                        {l.tipo === 'KIT'
+                          ? kits.map(k => <option key={k.id} value={k.id}>{k.nombre}</option>)
+                          : packagings.map(p => <option key={p.cod} value={p.cod}>{p.nom}</option>)
+                        }
+                      </select>
+
+                      <div>
+                        <label className="block text-[10px] text-slate-500 uppercase tracking-wider mb-1">
+                          Cantidad
+                        </label>
+                        <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => eliminarLinea(idx)}
-                            className="text-red-400 hover:text-red-300 p-1"
+                            onClick={() => actualizarLinea(idx, 'cantidad', Math.max(1, Number(l.cantidad) - 1))}
+                            className="w-10 h-10 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xl font-bold flex items-center justify-center transition shrink-0"
                           >
-                            <Trash2 size={14} />
+                            −
                           </button>
-                        </td>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={l.cantidad}
+                            onChange={e => actualizarLinea(idx, 'cantidad', e.target.value.replace(/[^0-9]/g, ''))}
+                            onBlur={e => {
+                              const n = parseInt(e.target.value, 10);
+                              actualizarLinea(idx, 'cantidad', !isNaN(n) && n >= 1 ? n : 1);
+                            }}
+                            className="flex-1 min-w-0 bg-slate-900 border border-slate-800 rounded px-3 py-2 text-base text-slate-200 text-center tabular-nums focus:outline-none focus:border-sky-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => actualizarLinea(idx, 'cantidad', Number(l.cantidad) + 1)}
+                            className="w-10 h-10 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xl font-bold flex items-center justify-center transition shrink-0"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] text-slate-500 uppercase tracking-wider mb-1">
+                          Precio u.
+                        </label>
+                        <div className="bg-slate-900 border border-slate-800 rounded px-3 py-2 text-sm text-slate-400 text-center tabular-nums">
+                          {formatearPrecio(l.precio_unit)}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+                        <span className="text-xs text-slate-400">Subtotal</span>
+                        <span className="text-sm font-bold text-slate-100 tabular-nums">
+                          {formatearPrecio(l.subtotal)}
+                        </span>
+                      </div>
+
+                      {l.tipo === 'KIT' && (
+                        <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={l.devuelve_envases}
+                            onChange={e => actualizarLinea(idx, 'devuelve_envases', e.target.checked)}
+                            className="w-4 h-4 accent-sky-500"
+                          />
+                          Cliente devuelve envases
+                        </label>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop: tabla */}
+                <div className="hidden md:block bg-slate-950 border border-slate-800 rounded overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-slate-500 uppercase tracking-wider text-[10px] border-b border-slate-800">
+                        <th className="text-left p-2">#</th>
+                        <th className="text-left p-2">Ítem</th>
+                        <th className="text-center p-2 w-32">Cant.</th>
+                        <th className="text-right p-2 w-24">Precio u.</th>
+                        <th className="text-right p-2 w-24">Subtotal</th>
+                        <th className="text-center p-2 w-24">Dev. env.</th>
+                        <th className="p-2 w-10"></th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {resumen.lineasCalculadas.map((l, idx) => (
+                        <tr key={idx} className="border-b border-slate-800/50">
+                          <td className="p-2 text-slate-500">{idx + 1}</td>
+                          <td className="p-2">
+                            {l.tipo === 'KIT' ? (
+                              <select
+                                value={l.item_cod}
+                                onChange={e => cambiarItemDeLinea(idx, e.target.value)}
+                                className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200"
+                              >
+                                {kits.map(k => (
+                                  <option key={k.id} value={k.id}>{k.nombre}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <select
+                                value={l.item_cod}
+                                onChange={e => cambiarItemDeLinea(idx, e.target.value)}
+                                className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200"
+                              >
+                                {packagings.map(p => (
+                                  <option key={p.cod} value={p.cod}>{p.nom}</option>
+                                ))}
+                              </select>
+                            )}
+                          </td>
+                          <td className="p-2 text-center">
+                            <div className="flex items-center gap-0.5 justify-center">
+                              <button
+                                type="button"
+                                onClick={() => actualizarLinea(idx, 'cantidad', Math.max(1, Number(l.cantidad) - 1))}
+                                className="w-6 h-6 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-sm font-bold flex items-center justify-center shrink-0"
+                              >
+                                −
+                              </button>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={l.cantidad}
+                                onChange={e => actualizarLinea(idx, 'cantidad', e.target.value.replace(/[^0-9]/g, ''))}
+                                onBlur={e => {
+                                  const n = parseInt(e.target.value, 10);
+                                  actualizarLinea(idx, 'cantidad', !isNaN(n) && n >= 1 ? n : 1);
+                                }}
+                                className="w-12 bg-slate-900 border border-slate-800 rounded px-1 py-1 text-xs text-slate-200 text-center tabular-nums"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => actualizarLinea(idx, 'cantidad', Number(l.cantidad) + 1)}
+                                className="w-6 h-6 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-sm font-bold flex items-center justify-center shrink-0"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </td>
+                          <td className="p-2 text-right text-slate-400 tabular-nums">
+                            {formatearPrecio(l.precio_unit)}
+                          </td>
+                          <td className="p-2 text-right text-slate-200 font-bold tabular-nums">
+                            {formatearPrecio(l.subtotal)}
+                          </td>
+                          <td className="p-2 text-center">
+                            {l.tipo === 'KIT' ? (
+                              <input
+                                type="checkbox"
+                                checked={l.devuelve_envases}
+                                onChange={e => actualizarLinea(idx, 'devuelve_envases', e.target.checked)}
+                                className="w-4 h-4 accent-sky-500 cursor-pointer"
+                              />
+                            ) : (
+                              <span className="text-slate-600">—</span>
+                            )}
+                          </td>
+                          <td className="p-2 text-center">
+                            <button
+                              type="button"
+                              onClick={() => eliminarLinea(idx)}
+                              className="text-red-400 hover:text-red-300 p-1"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
 
             {/* Faltantes */}
             {hayFaltantes && (
-              <div className="bg-amber-950/40 border border-amber-800 rounded p-4 space-y-2">
+              <div className="bg-amber-950/40 border border-amber-800 rounded p-3 sm:p-4 space-y-2">
                 <div className="flex items-center gap-2 text-amber-300 text-xs font-bold uppercase tracking-wider">
                   <AlertTriangle size={14} /> Stock insuficiente
                 </div>
                 <div className="space-y-1">
                   {faltantes.map(f => (
-                    <div key={f.cod} className="flex items-center justify-between text-xs">
+                    <div key={f.cod} className="flex flex-col sm:flex-row sm:items-center sm:justify-between text-xs gap-1">
                       <span className="text-amber-200">{f.nom}</span>
                       <span className="text-amber-300 tabular-nums">
                         requiere {formatearNumero(f.requerido)} {f.unidad} · disponible {formatearNumero(f.disponible)} {f.unidad}
@@ -498,15 +593,12 @@ export default function EditarPedidoModal({ isOpen, pedido, onClose, onPedidoAct
                     </div>
                   ))}
                 </div>
-                <div className="text-[10px] text-amber-400 pt-1">
-                  Corregí las cantidades o cargá stock antes de guardar.
-                </div>
               </div>
             )}
 
             {/* Resumen comercial */}
             {lineas.length > 0 && (
-              <div className="bg-slate-950 border border-slate-800 rounded p-4 space-y-2">
+              <div className="bg-slate-950 border border-slate-800 rounded p-3 sm:p-4 space-y-2">
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-slate-400">Subtotal</span>
                   <span className="text-slate-200 tabular-nums font-bold">
@@ -556,18 +648,19 @@ export default function EditarPedidoModal({ isOpen, pedido, onClose, onPedidoAct
               </div>
             )}
 
-            <div className="flex justify-end gap-2 pt-4 border-t border-slate-800">
+            {/* Botones de acción */}
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-4 border-t border-slate-800">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-3 py-2 rounded text-xs text-slate-400 hover:bg-slate-800 transition"
+                className="px-3 py-2.5 sm:py-2 rounded text-xs text-slate-400 hover:bg-slate-800 transition"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
                 disabled={enviando || lineas.length === 0 || hayFaltantes}
-                className="bg-sky-600 hover:bg-sky-500 text-white font-medium px-4 py-2 rounded text-xs transition disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-sky-600 hover:bg-sky-500 text-white font-medium px-4 py-2.5 sm:py-2 rounded text-xs transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {enviando ? 'Guardando…' : 'Guardar Cambios'}
               </button>

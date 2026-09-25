@@ -8,7 +8,7 @@ import EditarPedidoModal from '../components/EditarPedidoModal.jsx';
 import PedidoDetalleModal from '../components/PedidoDetalleModal.jsx';
 import {
   Plus, CheckCircle, Clock, XCircle, AlertCircle, Edit2, Eye,
-  Package, Truck, BadgeCheck
+  Package, Truck, BadgeCheck, Search
 } from 'lucide-react';
 
 function formatearPrecio(n) {
@@ -43,6 +43,7 @@ export default function PedidosView() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
   const [filtros, setFiltros] = useState([]);
+  const [busqueda, setBusqueda] = useState('');
 
   const [modalCrear, setModalCrear] = useState(false);
 
@@ -91,9 +92,26 @@ export default function PedidosView() {
   }, [pedidos]);
 
   const pedidosFiltrados = useMemo(() => {
-    if (filtros.length === 0) return pedidos;
-    return pedidos.filter(p => filtros.includes(p.estado));
-  }, [pedidos, filtros]);
+    let resultado = pedidos;
+
+    // Filtro por estado
+    if (filtros.length > 0) {
+      resultado = resultado.filter(p => filtros.includes(p.estado));
+    }
+
+    // Filtro por búsqueda de texto
+    if (busqueda.trim()) {
+      const s = busqueda.toLowerCase().trim();
+      resultado = resultado.filter(p => {
+        const razon = (p.cliente?.razon_social ?? '').toLowerCase();
+        const fantasia = (p.cliente?.nombre_fantasia ?? '').toLowerCase();
+        const obs = (p.obs ?? '').toLowerCase();
+        return razon.includes(s) || fantasia.includes(s) || obs.includes(s);
+      });
+    }
+
+    return resultado;
+  }, [pedidos, filtros, busqueda]);
 
   /* =========================================================
      Acciones
@@ -157,9 +175,6 @@ export default function PedidosView() {
     }
   };
 
-  /* =========================================================
-     Botones por estado
-     ========================================================= */
   const botonesDeEstado = (p) => {
     const botones = [];
 
@@ -236,7 +251,19 @@ export default function PedidosView() {
         </button>
       </div>
 
-      {/* Filtros */}
+      {/* Buscador */}
+      <div className="relative">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+        <input
+          type="text"
+          value={busqueda}
+          onChange={e => setBusqueda(e.target.value)}
+          placeholder="Buscar por cliente u observaciones…"
+          className="w-full bg-slate-900 border border-slate-800 rounded pl-9 pr-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-sky-500"
+        />
+      </div>
+
+      {/* Filtros por estado */}
       {pedidos.length > 0 && (
         <div className="flex gap-2 flex-wrap">
           <button
